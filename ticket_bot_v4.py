@@ -14,6 +14,7 @@
 """
 
 import json
+import os
 import re
 import time
 from datetime import datetime
@@ -25,8 +26,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
 # ============ 常量 ============
-LOG_FILE = "ticket_log_v4.txt"
-CONFIG_FILE = "config.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(BASE_DIR, "ticket_log_v4.txt")
+CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 LOGIN_TIMEOUT = 300          # 扫码登录等待上限（秒）
 QUERY_TIMEOUT = 15           # 查票接口等待上限（秒）
 QUERY_RETRY = 3              # 单笔订单查票重试次数
