@@ -1,0 +1,9 @@
+# 个人配置：含真实乘客/站点/日期，绝不入库
+config.json
+
+# 运行日志：可能含行程与订单信息
+ticket_log_v4.txt
+
+# Python
+__pycache__/
+*.pyc
