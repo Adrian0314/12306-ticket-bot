@@ -125,9 +125,18 @@ class TicketBot:
         opts = Options()
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_argument("--disable-blink-features=AutomationControlled")
-        opts.add_argument("--disable-infobars")
 
-        self.driver = webdriver.Chrome(opts)
+        # Chrome 启动偶发闪退（更新中/进程冲突），重试 3 次
+        for attempt in range(1, 4):
+            try:
+                self.driver = webdriver.Chrome(opts)
+                break
+            except Exception as e:
+                log(f"  Chrome 启动失败（第{attempt}/3次）: {str(e)[:120]}")
+                if attempt == 3:
+                    raise
+                time.sleep(2)
+
         self.driver.maximize_window()
         self._setup_cdp_intercept()
         self.driver.get("https://kyfw.12306.cn/otn/resources/login.html")
