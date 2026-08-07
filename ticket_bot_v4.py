@@ -67,22 +67,16 @@ class TicketBot:
         self.debug_seat = config.get("debug_seat", False)
         self.driver = None
         self.stop_all = False
-        # 命中查票接口的 requestId 列表（listener 写入，主线程消费）
-        self._pending = []
 
     # ============ CDP 网络监听 ============
     def _setup_cdp_intercept(self):
-        """开启网络监听，注册查票接口事件回调"""
+        """开启网络监听，查询时用性能日志轮询查票接口"""
         self.driver.execute_cdp_cmd("Network.enable", {})
-        self.driver.add_cdp_listener("Network.responseReceived", self._on_response)
 
-    def _on_response(self, message):
-        """listener 回调：记录命中查票接口的 requestId，事件不丢失"""
+    def _drain_performance_logs(self):
+        """读取并清空性能日志缓冲，避免登录期历史事件占满缓冲"""
         try:
-            response = message.get("params", {}).get("response", {})
-            url = response.get("url", "")
-            if "queryG" in url or "queryZ" in url:
-                self._pending.append(message["params"]["requestId"])
+            self.driver.get_log("performance")
         except Exception:
             pass
 
@@ -96,20 +90,41 @@ class TicketBot:
         except Exception:
             return None
 
-    def _intercept_query_response(self, baseline=0, timeout=QUERY_TIMEOUT):
+    def _find_query_response(self, timeout=QUERY_TIMEOUT):
         """
-        等待本次查询（index >= baseline）的查票接口响应并返回 JSON。
-        listener 已实时记录 requestId，这里逐个取响应体即可，不再全量扫日志。
+        轮询性能日志，等待本次查询产生的查票接口响应并返回 JSON。
+        chromedriver 的 get_log 读取后即清空，天然增量；对响应体未就绪的
+        requestId 保留重试，避免时序问题丢响应。
         """
         deadline = time.time() + timeout
+        pending_ids = []
         tried = set()
         while time.time() < deadline:
-            for idx in range(baseline, len(self._pending)):
-                request_id = self._pending[idx]
-                if request_id in tried:
+            # 扫新增日志，收集查票接口的 requestId
+            try:
+                logs = self.driver.get_log("performance")
+            except Exception:
+                logs = []
+            for entry in logs:
+                try:
+                    log_data = json.loads(entry["message"])
+                    msg = log_data.get("message", {})
+                    if msg.get("method") != "Network.responseReceived":
+                        continue
+                    response = msg.get("params", {}).get("response", {})
+                    url = response.get("url", "")
+                    if "queryG" in url or "queryZ" in url:
+                        rid = msg["params"]["requestId"]
+                        if rid not in pending_ids:
+                            pending_ids.append(rid)
+                except Exception:
                     continue
-                tried.add(request_id)
-                body = self._get_response_body(request_id)
+            # 逐个取响应体，失败的下一轮重试
+            for rid in pending_ids:
+                if rid in tried:
+                    continue
+                tried.add(rid)
+                body = self._get_response_body(rid)
                 if body:
                     try:
                         return json.loads(body)
@@ -189,11 +204,11 @@ class TicketBot:
 
         log(f"  查询: {from_st} → {to_st}  {date}")
 
-        # 点击查询前记基线，只认本次查询新产生的响应
-        baseline = len(self._pending)
+        # 点击查询前清空性能日志缓冲，只认本次查询新产生的响应
+        self._drain_performance_logs()
         self.driver.find_element(By.ID, "query_ticket").click()
 
-        query_data = self._intercept_query_response(baseline=baseline, timeout=QUERY_TIMEOUT)
+        query_data = self._find_query_response(timeout=QUERY_TIMEOUT)
         if not query_data:
             log("  未监听查票接口响应，尝试从 DOM 解析")
             return self._parse_from_dom(time_range, seat_type)
