@@ -17,9 +17,11 @@ import json
 import os
 import re
 import time
-from datetime import datetime
+import traceback
+from datetime import datetime, timedelta
 
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -33,14 +35,17 @@ LOGIN_TIMEOUT = 300          # 扫码登录等待上限（秒）
 QUERY_TIMEOUT = 15           # 查票接口等待上限（秒）
 QUERY_RETRY = 3              # 单笔订单查票重试次数
 SALE_LEAD_TIME = 5           # 起售时刻提前量（秒），覆盖导航+填表耗时
+SALE_SKIP_THRESHOLD = 6 * 3600  # 起售顺延次日后仍需等待超过该秒数 → 视为已过，立即查询
 BOOK_BTN_TEXT = "预订"        # 12306 预订按钮文字
 
-# 席别 → 查票接口字段索引（leftTicket 返回格式）
+# 席别 → 查票接口字段索引（leftTicket 返回格式，字段以 | 分隔）
+# 索引依据 2025 年公开解析源码（OpenCLI / 12306-skill）核对：
+#   [3]车次 [8]出发 [9]到达 [10]历时 [25]特等 [26]无座 [29]硬座 [30]二等 [31]一等 [32]商务
 SEAT_FIELD_MAP = {
     "硬座": 29,
     "二等座": 30,
     "一等座": 31,
-    "特等座": 32,
+    "特等座": 25,
     "商务座": 32,
     "无座": 26,
 }
@@ -52,6 +57,24 @@ def log(msg):
     print(line)
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+def log_exc(msg):
+    """记录错误信息并附完整 traceback，便于定位问题"""
+    log(msg)
+    log(traceback.format_exc().strip())
+
+
+def seat_available(val):
+    """12306 余票值判断：数字(>0)或"有"=有票；无/--/空=没票"""
+    if val == "有":
+        return True
+    if val in ("无", "--", ""):
+        return False
+    try:
+        return int(val) > 0
+    except (ValueError, TypeError):
+        return False
 
 
 def load_config(path=CONFIG_FILE):
@@ -67,8 +90,21 @@ class TicketBot:
         self.mode = config.get("mode", "sale_time")
         self.delay_seconds = config.get("delay_seconds", 5)
         self.debug_seat = config.get("debug_seat", False)
+        self.mute_car = config.get("mute_car", False)           # 勾选静音车厢（车次支持时）
+        self.preferred_seat = config.get("preferred_seat", "")  # 首选座位字母 A/B/C/D/F，空=不选座
+        self.auto_submit = config.get("auto_submit", False)     # False=停在确认页人工提交
         self.driver = None
         self.stop_all = False
+
+    # ============ 选择器（用户 F12 定位，已按真实元素写死） ============
+    MUTE_CAR_XPATH = "//input[@id='seat-jy']"
+    # 二等座座位图在 erdeng1 容器内（一等/特等/商务容器都是隐藏的，且 id 重复，必须限定容器）
+    SEAT_CHOICE_XPATH = "//div[@id='erdeng1']//a[text()='{letter}']"
+    STUDENT_DIALOG_OK_XPATH = "//a[contains(@id,'xsertcj') and text()='确认']"
+    # 勾选静音车厢后弹出的规则说明弹窗的确定按钮
+    WARNING_DIALOG_OK_XPATH = "//a[@id='qd_closeDefaultWarningWindowDialog_id']"
+    # 点确认后弹出的学生票资质核验提示弹窗的确定按钮
+    XSPN_DIALOG_OK_XPATH = "//a[@id='conf_xspnalert']"
 
     # ============ CDP 网络监听 ============
     def _setup_cdp_intercept(self):
@@ -115,23 +151,24 @@ class TicketBot:
                         continue
                     response = msg.get("params", {}).get("response", {})
                     url = response.get("url", "")
-                    if "queryG" in url or "queryZ" in url:
+                    if "leftTicket/query" in url:
                         rid = msg["params"]["requestId"]
                         if rid not in pending_ids:
                             pending_ids.append(rid)
                 except Exception:
                     continue
-            # 逐个取响应体，失败的下一轮重试
+            # 逐个取响应体；body 未就绪的 requestId 下一轮重试，不永久跳过
             for rid in pending_ids:
                 if rid in tried:
                     continue
-                tried.add(rid)
                 body = self._get_response_body(rid)
-                if body:
-                    try:
-                        return json.loads(body)
-                    except Exception:
-                        continue
+                if not body:
+                    continue
+                tried.add(rid)
+                try:
+                    return json.loads(body)
+                except Exception:
+                    continue
             time.sleep(0.1)
         return None
 
@@ -142,6 +179,8 @@ class TicketBot:
         opts = Options()
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_argument("--disable-blink-features=AutomationControlled")
+        # 关键：开启性能日志，CDP 网络监听（get_log("performance")）才能读到查票接口
+        opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
         # Chrome 启动偶发闪退（更新中/进程冲突），重试 3 次
         for attempt in range(1, 4):
@@ -151,6 +190,7 @@ class TicketBot:
             except Exception as e:
                 log(f"  Chrome 启动失败（第{attempt}/3次）: {str(e)[:120]}")
                 if attempt == 3:
+                    log_exc("  Chrome 启动失败次数用尽，退出")
                     raise
                 time.sleep(2)
 
@@ -235,11 +275,15 @@ class TicketBot:
             if len(fields) < 32:
                 continue
 
-            train_code = fields[2]      # 车次号，如 G2917
+            train_code = fields[3]      # 车次代码，如 G2917（[2] 是内部 train_no）
             start_time = fields[8]
             arrive_time = fields[9]
             duration = fields[10]
             seat_count = fields[seat_idx] if seat_idx < len(fields) else "无"
+
+            # 该席别没票的车次直接排除，避免选了无票车次下单失败
+            if not seat_available(seat_count):
+                continue
 
             # 时段筛选
             if time_range and "-" in time_range:
@@ -343,6 +387,9 @@ class TicketBot:
             except Exception:
                 log(f"  未找到乘客（第{i+1}位）")
 
+        # 学生票提示弹窗：选完乘车人后出现，检测并点确认关掉
+        self._close_student_dialog()
+
         # 席别下拉框（如果页面上有的话）
         if seat_type:
             try:
@@ -352,30 +399,136 @@ class TicketBot:
             except Exception:
                 pass
 
-        # 提交订单
+        # 点"提交订单"，弹出订单确认框（选座/静音车厢都在框内，点之前不存在）
         try:
             submit_btn = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "submitOrder_id"))
             )
         except Exception as e:
-            log(f"  找不到提交按钮: {e}")
+            log_exc(f"  找不到提交按钮: {e}")
             return False
         try:
             submit_btn.click()
         except Exception:
             log("  提交按钮被遮挡，用 JS 点击绕过")
             self.driver.execute_script("arguments[0].click();", submit_btn)
-        log("  已提交")
-        time.sleep(2)
+        log("  已打开订单确认框")
+        time.sleep(1)
 
-        # 确认
+        # 确认框内：勾静音车厢 + 选座（车次支持时，找不到就跳过）
+        if self.mute_car:
+            self._try_select_mute_car()
+        if self.preferred_seat:
+            self._try_select_seat(self.preferred_seat)
+
+        # 人工确认模式：停在确认框的"确认"按钮前，人工核对后手动点击
+        if not self.auto_submit:
+            log("  已就绪：请人工核对确认框内的车次/乘车人/席别/座位，手动点击“确认”完成下单")
+            input("  核对并手动确认后，按回车继续下一笔订单...")
+            # 点确认后可能弹出学生票资质核验提示弹窗，自动关掉
+            self._close_xspn_dialog()
+            log("  请尽快完成支付；未支付前 12306 无法购买其他车票")
+            return None
+
+        # 自动确认
         try:
             self.driver.find_element(By.ID, "qr_submit_id").click()
             log("  已确认，等待系统处理...")
+            self._close_xspn_dialog()
             return self._wait_order_result()
         except Exception:
-            log("  确认失败")
+            log_exc("  确认失败")
             return None
+
+    def _close_xspn_dialog(self):
+        """点掉确认后弹出的学生票资质核验提示弹窗。无弹窗则静默跳过。
+        元素: <div id="xspnalerttext">在校资质核验仅对您的在校学生身份进行核验...</div>
+              <a id="conf_xspnalert">确认</a>
+        """
+        try:
+            btn = WebDriverWait(
+                self.driver, 5, ignored_exceptions=(WebDriverException,)
+            ).until(
+                EC.presence_of_element_located((By.XPATH, self.XSPN_DIALOG_OK_XPATH))
+            )
+            try:
+                btn.click()
+            except Exception as e:
+                log(f"  核验弹窗确认按钮普通点击失败({str(e)[:80]})，改用 JS 点击")
+                self.driver.execute_script("arguments[0].click();", btn)
+            log("  已关闭学生票资质核验提示弹窗")
+            time.sleep(0.5)
+        except Exception:
+            pass  # 无弹窗，正常继续
+
+    # ============ 静音车厢 / 选座（车次不支持则跳过） ============
+    def _close_student_dialog(self):
+        """选完乘车人后检测学生票弹窗：出现则点确认关闭，未出现则记录。
+        元素: <div id="dialog_xsertcj_msg">您是要购买学生票吗？...</div>
+              <a id="dialog_xsertcj_ok">确认</a> / <a id="dialog_xsertcj_cancel">取消</a>
+        """
+        try:
+            btn = WebDriverWait(
+                self.driver, 5, ignored_exceptions=(WebDriverException,)
+            ).until(
+                EC.presence_of_element_located((By.XPATH, self.STUDENT_DIALOG_OK_XPATH))
+            )
+            # 普通点击被弹窗遮罩/动画挡住时，用 JS 点击绕过
+            try:
+                btn.click()
+            except Exception as e:
+                log(f"  确认按钮普通点击失败({str(e)[:80]})，改用 JS 点击")
+                self.driver.execute_script("arguments[0].click();", btn)
+            log("  学生票弹窗出现，已点确认关闭")
+            time.sleep(0.5)
+        except Exception:
+            log("  未出现学生票弹窗")
+
+    def _try_select_mute_car(self):
+        """勾选静音车厢。找不到元素说明本车次不支持，跳过不报错。
+        勾选后会弹出静音车厢规则说明弹窗，需点确定关掉，否则挡住选座。
+        """
+        try:
+            cb = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, self.MUTE_CAR_XPATH))
+            )
+            if not cb.is_selected():
+                cb.click()
+            log("  已勾选静音车厢")
+            self._close_warning_dialog()
+        except Exception:
+            log("  本车次无静音车厢选项，跳过")
+
+    def _close_warning_dialog(self):
+        """关闭勾选静音车厢后弹出的规则说明弹窗。无弹窗则静默跳过。"""
+        try:
+            btn = WebDriverWait(
+                self.driver, 5, ignored_exceptions=(WebDriverException,)
+            ).until(
+                EC.presence_of_element_located((By.XPATH, self.WARNING_DIALOG_OK_XPATH))
+            )
+            try:
+                btn.click()
+            except Exception as e:
+                log(f"  提示弹窗确定按钮普通点击失败({str(e)[:80]})，改用 JS 点击")
+                self.driver.execute_script("arguments[0].click();", btn)
+            log("  已关闭静音车厢说明弹窗")
+            time.sleep(0.5)
+        except Exception:
+            pass  # 无弹窗，正常继续
+
+    def _try_select_seat(self, letter):
+        """点击座位图字母按钮（优先分配）。车次不支持选座则跳过。"""
+        try:
+            btn = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, self.SEAT_CHOICE_XPATH.format(letter=letter))
+                )
+            )
+            btn.click()
+            log(f"  已选择优先分配座位: {letter}")
+        except Exception:
+            log(f"  本车次无选座功能或未找到 {letter} 座按钮，跳过")
 
     def _wait_order_result(self, timeout=60):
         """
@@ -435,13 +588,23 @@ class TicketBot:
 
     # ============ 主流程 ============
     def wait_until_sale_time(self, sale_time):
-        """阻塞等待到起售时刻，提前 SALE_LEAD_TIME 秒放行给查询动作"""
+        """阻塞等待到起售时刻，提前 SALE_LEAD_TIME 秒放行给查询动作。
+        今日起售时刻已过则顺延到次日；顺延后仍需等待超过
+        SALE_SKIP_THRESHOLD 秒（如白天起售已过），视为已过，立即放行。
+        """
         if not sale_time:
             return
         now = datetime.now()
         h, m = map(int, sale_time.split(":"))
         target = now.replace(hour=h, minute=m, second=0, microsecond=0)
         wait_seconds = (target - now).total_seconds()
+        if wait_seconds < 0:
+            # 今日起售时刻已过：顺延到次日再等
+            target += timedelta(days=1)
+            wait_seconds = (target - now).total_seconds()
+            if wait_seconds > SALE_SKIP_THRESHOLD:
+                log(f"  起售 {sale_time} 已过（顺延次日需等 {int(wait_seconds // 3600)} 小时），直接查询")
+                return
         if wait_seconds <= SALE_LEAD_TIME:
             return
         log(f"  距起售 {sale_time} 还有 {int(wait_seconds // 60)} 分 {int(wait_seconds % 60)} 秒")
@@ -515,7 +678,7 @@ class TicketBot:
                         continue
                     success = self.book_ticket(order, train)
                 except Exception as e:
-                    log(f"  订单处理异常: {e}")
+                    log_exc(f"  订单处理异常: {e}")
                     continue
 
                 if success is True:
@@ -523,6 +686,8 @@ class TicketBot:
                 elif self.stop_all:
                     log("  ✗ 风控拦截，终止后续订单")
                     break
+                elif not self.auto_submit:
+                    log("  → 已转人工确认，订单结果请自行核对")
                 else:
                     log("  ✗ 订票失败")
                 time.sleep(2)

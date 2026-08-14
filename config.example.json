@@ -1,7 +1,10 @@
 {
-  "mode": "timer",
+  "mode": "sale_time",
   "delay_seconds": 1,
   "debug_seat": false,
+  "mute_car": false,
+  "preferred_seat": "",
+  "auto_submit": false,
   "orders": [
     {
       "enabled": true,
