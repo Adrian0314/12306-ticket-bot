@@ -1,0 +1,56 @@
+{
+  // 抢票模式: "sale_time" = 按每笔订单的起售时间抢票; "timer" = 登录后统一倒计时
+  "mode": "timer",
+  // timer 模式下，登录成功后等待的秒数
+  "delay_seconds": 1,
+  // 调试用: true = 点预订后暂停，人工查看选座界面；平时保持 false
+  "debug_seat": false,
+  // 全局默认: 是否勾选静音车厢（true=勾选，车次不支持时自动跳过）；每笔订单可单独覆盖
+  "mute_car": false,
+  // 全局默认: 首选座位字母 A/B/C/D/F（二等座没有 E 座），空字符串 "" = 不选座；每笔订单可单独覆盖
+  "preferred_seat": "",
+  // 测试模式: true = 流程走到确认订单页后不点"确认"按钮，停在页面核对各元素位置；false = 正常下单
+  "test_mode": false,
+  // 订单列表：每笔订单的线路、日期、乘车人完全独立，可配置多笔
+  "orders": [
+    {
+      // true = 执行这笔订单，false = 跳过
+      "enabled": true,
+      // 出发站（中文名，必须与 12306 站名一致）
+      "from_st": "北京南",
+      // 到达站（中文名）
+      "to_st": "上海虹桥",
+      // 出发日期，格式 YYYY-MM-DD（示例日期，使用时改成自己的）
+      "date": "2026-09-30",
+      // 起售时间，格式 HH:MM（sale_time 模式下生效；不确定就留空 "")
+      // 注意：按出发站起售时间填。北京南=10:00
+      "sale_time": "10:00",
+      // 出发时段筛选，如 "08:00-12:00"；留空 "" = 不限时段
+      "depart_time_range": "10:00-12:00",
+      // 席别: 二等座 / 一等座 / 商务座 / 硬座 / 无座
+      "seat_type": "二等座",
+      // 本笔订单: 是否勾静音车厢（不写则用顶部全局 mute_car）
+      "mute_car": true,
+      // 本笔订单: 首选座位（不写则用顶部全局 preferred_seat）
+      "preferred_seat": "D",
+      // 乘车人列表：姓名必须与 12306 账户乘车人名单完全一致，否则勾选不到人
+      "passengers": [
+        { "name": "张三" }
+      ]
+    },
+    {
+      "enabled": false,
+      "from_st": "北京南",
+      "to_st": "杭州东",
+      "date": "2026-09-28",
+      "sale_time": "10:00",
+      "depart_time_range": "",
+      "seat_type": "二等座",
+      "mute_car": false,
+      "preferred_seat": "",
+      "passengers": [
+        { "name": "李四" }
+      ]
+    }
+  ]
+}

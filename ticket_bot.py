@@ -78,8 +78,14 @@ def seat_available(val):
 
 
 def load_config(path=CONFIG_FILE):
+    """读取 config.json，支持 // 行注释（注释行会被忽略后解析）"""
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        text = f.read()
+    lines = [
+        line for line in text.splitlines()
+        if not line.lstrip().startswith("//")
+    ]
+    return json.loads("\n".join(lines))
 
 
 class TicketBot:
@@ -93,6 +99,7 @@ class TicketBot:
         self.mute_car = config.get("mute_car", False)           # 勾选静音车厢（车次支持时）
         self.preferred_seat = config.get("preferred_seat", "")  # 首选座位字母 A/B/C/D/F，空=不选座
         self.auto_submit = config.get("auto_submit", False)     # False=停在确认页人工提交
+        self.test_mode = config.get("test_mode", False)         # True=测试，最后不点确认订单按钮
         self.driver = None
         self.stop_all = False
 
@@ -105,6 +112,12 @@ class TicketBot:
     WARNING_DIALOG_OK_XPATH = "//a[@id='qd_closeDefaultWarningWindowDialog_id']"
     # 点确认后弹出的学生票资质核验提示弹窗的确定按钮
     XSPN_DIALOG_OK_XPATH = "//a[@id='conf_xspnalert']"
+    # 确认订单后、支付页前的过渡层（自动几秒后关闭，需等它消失才能转其他订单）
+    DHX_OVERLAY_XPATH = "//div[contains(@id,'dhxMainCont')]"
+    # 顶部"车票"导航（从支付页等页面切回查票页用）
+    TRAIN_NAV_XPATH = "//a[contains(@class,'nav-hd') and contains(text(),'车票')]"
+    # 导航菜单里的"单程"选项（12306 新版菜单是 a[data-href]，不是 input#dc）
+    SINGLE_TRIP_XPATH = "//a[contains(@data-href,'leftTicket/init?linktypeid=dc')]"
 
     # ============ CDP 网络监听 ============
     def _setup_cdp_intercept(self):
@@ -172,6 +185,27 @@ class TicketBot:
             time.sleep(0.1)
         return None
 
+    # ============ 页面导航 ============
+    def _goto_query_page(self):
+        """点击顶部"车票"导航回到查票页（单程），供每笔订单开始前使用。
+        贴近真实操作，避免从支付页直接跳 URL 触发拦截；失败则回退直接跳转。
+        """
+        try:
+            nav = WebDriverWait(self.driver, 5, ignored_exceptions=(WebDriverException,)).until(
+                EC.element_to_be_clickable((By.XPATH, self.TRAIN_NAV_XPATH))
+            )
+            nav.click()
+            time.sleep(0.5)
+            dc = WebDriverWait(self.driver, 5, ignored_exceptions=(WebDriverException,)).until(
+                EC.element_to_be_clickable((By.XPATH, self.SINGLE_TRIP_XPATH))
+            )
+            dc.click()
+            log("  已通过“车票”导航回到查票页（单程）")
+            time.sleep(0.5)
+        except Exception:
+            log("  导航点击失败，改用直接跳转查票页")
+            self.driver.get("https://kyfw.12306.cn/otn/leftTicket/init")
+
     # ============ 登录 ============
     def login(self):
         log("启动浏览器，请扫码登录...")
@@ -232,7 +266,8 @@ class TicketBot:
         time_range = order.get("depart_time_range", "")
         seat_type = order.get("seat_type", "二等座")
 
-        self.driver.get("https://kyfw.12306.cn/otn/leftTicket/init")
+        # 通过"车票"导航回到查票页（单程），失败则直接跳转 URL
+        self._goto_query_page()
 
         self._fill_station("fromStationText", from_st)
         time.sleep(0.5)
@@ -344,6 +379,9 @@ class TicketBot:
         """在浏览器里完成选座、选人、提交"""
         passengers = order.get("passengers", [])
         seat_type = order.get("seat_type", "")
+        # 静音车厢/选座支持订单级独立配置，订单没写则用全局默认
+        mute_car = order.get("mute_car", self.mute_car)
+        preferred_seat = order.get("preferred_seat", self.preferred_seat)
 
         # 点预订按钮
         if "book_btn" in train_info:
@@ -416,10 +454,17 @@ class TicketBot:
         time.sleep(1)
 
         # 确认框内：勾静音车厢 + 选座（车次支持时，找不到就跳过）
-        if self.mute_car:
+        if mute_car:
             self._try_select_mute_car()
-        if self.preferred_seat:
-            self._try_select_seat(self.preferred_seat)
+        if preferred_seat:
+            self._try_select_seat(preferred_seat)
+
+        # 测试模式：停在确认订单页，不点"确认"按钮，供人工核对各元素位置
+        if self.test_mode:
+            log("  测试模式：已停在确认订单页，不会点击“确认”按钮")
+            log("  请在浏览器中核对各元素位置（车次/乘车人/席别/座位/确认按钮）")
+            input("  检查完毕后按回车结束...")
+            return None
 
         # 人工确认模式：停在确认框的"确认"按钮前，人工核对后手动点击
         if not self.auto_submit:
@@ -427,6 +472,8 @@ class TicketBot:
             input("  核对并手动确认后，按回车继续下一笔订单...")
             # 点确认后可能弹出学生票资质核验提示弹窗，自动关掉
             self._close_xspn_dialog()
+            # 等待支付过渡层完全消失，再转下一笔订单
+            self._wait_dhx_overlay_gone()
             log("  请尽快完成支付；未支付前 12306 无法购买其他车票")
             return None
 
@@ -435,22 +482,42 @@ class TicketBot:
             self.driver.find_element(By.ID, "qr_submit_id").click()
             log("  已确认，等待系统处理...")
             self._close_xspn_dialog()
+            self._wait_dhx_overlay_gone()
             return self._wait_order_result()
         except Exception:
             log_exc("  确认失败")
             return None
 
+    def _wait_dhx_overlay_gone(self, timeout=20):
+        """等待确认订单后的支付过渡层（dhxMainCont）完全消失。
+        它会在出现几秒后自动关闭；未消失前转其他订单可能出错。
+        """
+        try:
+            WebDriverWait(self.driver, timeout, ignored_exceptions=(WebDriverException,)).until(
+                lambda d: not self._dhx_overlay_visible()
+            )
+            log("  支付过渡层已消失，继续")
+        except Exception:
+            log("  等待支付过渡层消失超时，继续（请自行确认当前订单状态）")
+
+    def _dhx_overlay_visible(self):
+        try:
+            return self.driver.find_element(
+                By.XPATH, self.DHX_OVERLAY_XPATH
+            ).is_displayed()
+        except Exception:
+            return False
+
     def _close_xspn_dialog(self):
         """点掉确认后弹出的学生票资质核验提示弹窗。无弹窗则静默跳过。
         元素: <div id="xspnalerttext">在校资质核验仅对您的在校学生身份进行核验...</div>
               <a id="conf_xspnalert">确认</a>
+        该弹窗内容位于 iframe 内，需先切进 iframe 再点确认按钮，点完切回主文档。
         """
         try:
-            btn = WebDriverWait(
-                self.driver, 5, ignored_exceptions=(WebDriverException,)
-            ).until(
-                EC.presence_of_element_located((By.XPATH, self.XSPN_DIALOG_OK_XPATH))
-            )
+            btn = self._find_xspn_btn()
+            if btn is None:
+                return
             try:
                 btn.click()
             except Exception as e:
@@ -458,8 +525,35 @@ class TicketBot:
                 self.driver.execute_script("arguments[0].click();", btn)
             log("  已关闭学生票资质核验提示弹窗")
             time.sleep(0.5)
-        except Exception:
-            pass  # 无弹窗，正常继续
+        finally:
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+
+    def _find_xspn_btn(self, timeout=5):
+        """在主文档及各 iframe 中查找学生票核验弹窗的确认按钮，找到返回元素。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                return self.driver.find_element(By.XPATH, self.XSPN_DIALOG_OK_XPATH)
+            except Exception:
+                pass
+            for iframe in self.driver.find_elements(By.TAG_NAME, "iframe"):
+                try:
+                    self.driver.switch_to.frame(iframe)
+                except Exception:
+                    continue
+                try:
+                    return self.driver.find_element(By.XPATH, self.XSPN_DIALOG_OK_XPATH)
+                except Exception:
+                    pass
+                try:
+                    self.driver.switch_to.parent_frame()
+                except Exception:
+                    self.driver.switch_to.default_content()
+            time.sleep(0.2)
+        return None
 
     # ============ 静音车厢 / 选座（车次不支持则跳过） ============
     def _close_student_dialog(self):
@@ -490,10 +584,14 @@ class TicketBot:
         """
         try:
             cb = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, self.MUTE_CAR_XPATH))
+                EC.presence_of_element_located((By.XPATH, self.MUTE_CAR_XPATH))
             )
             if not cb.is_selected():
-                cb.click()
+                try:
+                    label = self.driver.find_element(By.XPATH, "//label[@for='seat-jy']")
+                    label.click()
+                except Exception:
+                    self.driver.execute_script("arguments[0].click();", cb)
             log("  已勾选静音车厢")
             self._close_warning_dialog()
         except Exception:
@@ -525,7 +623,10 @@ class TicketBot:
                     (By.XPATH, self.SEAT_CHOICE_XPATH.format(letter=letter))
                 )
             )
-            btn.click()
+            try:
+                btn.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", btn)
             log(f"  已选择优先分配座位: {letter}")
         except Exception:
             log(f"  本车次无选座功能或未找到 {letter} 座按钮，跳过")
@@ -632,6 +733,8 @@ class TicketBot:
                         "sale_time": o.get("sale_time"),
                         "depart_time_range": o.get("depart_time_range", ""),
                         "seat_type": o.get("seat_type", ""),
+                        "mute_car": o.get("mute_car", self.mute_car),
+                        "preferred_seat": o.get("preferred_seat", self.preferred_seat),
                         "passengers": [],
                     }
                 merged[key]["passengers"].extend(o["passengers"])
@@ -639,6 +742,10 @@ class TicketBot:
                     merged[key]["depart_time_range"] = o["depart_time_range"]
                 if not merged[key]["seat_type"] and o.get("seat_type"):
                     merged[key]["seat_type"] = o["seat_type"]
+                if not merged[key]["mute_car"] and o.get("mute_car", self.mute_car):
+                    merged[key]["mute_car"] = o["mute_car"]
+                if not merged[key]["preferred_seat"] and o.get("preferred_seat", self.preferred_seat):
+                    merged[key]["preferred_seat"] = o["preferred_seat"]
 
             merged_orders = list(merged.values())
             merged_orders.sort(key=lambda o: o.get("sale_time", "99:99"))
@@ -686,8 +793,14 @@ class TicketBot:
                 elif self.stop_all:
                     log("  ✗ 风控拦截，终止后续订单")
                     break
+                elif self.test_mode:
+                    log("  → 测试模式：已停在确认页，不继续处理下一笔订单")
+                    break
                 elif not self.auto_submit:
-                    log("  → 已转人工确认，订单结果请自行核对")
+                    # 12306 规则：未支付/取消前无法购买其他车票，一次运行只处理一笔
+                    log("  → 本笔订单已转人工，请先完成支付或取消")
+                    log("  → 处理下一笔：支付或取消本单后，将本单 enabled 改为 false，重新运行")
+                    break
                 else:
                     log("  ✗ 订票失败")
                 time.sleep(2)

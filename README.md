@@ -4,6 +4,8 @@
 
 > ⚠️ **免责声明**：本项目仅供个人学习参考，请勿用于商业用途或规模化抢票。使用本脚本产生的任何后果由使用者自行承担。
 
+> 🔒 **隐私提示**：仓库内的 `config.json` 是脱敏示例（无真实姓名 / 行程）。请把它改成你自己的订单后再运行；**不要把含真实信息的配置提交到公开仓库**，建议使用私有仓库，或按 `.gitignore` 中的说明自行忽略该文件。
+
 ## 功能
 
 - 浏览器扫码登录，自动检测登录状态
@@ -31,18 +33,17 @@ pip install selenium
 
 ## 使用方法
 
-1. 复制 `config.example.json` 为 `config.json`（`config.json` 已被 `.gitignore` 排除，不会误提交个人信息）
-2. 在 `config.json` 里填入你的订单（出发站、到达站、日期、乘车人）及功能开关
-3. 运行：
+1. 编辑 `config.json`（仓库自带脱敏示例，按你的订单修改：出发站、到达站、日期、乘车人及功能开关）
+2. 运行：
 
 ```bash
-python ticket_bot_v4.py
+python ticket_bot.py
 ```
 
-4. 浏览器打开 12306 登录页，手机 App 扫码登录
-5. 脚本自动按配置查票、选人、选席别、勾静音车厢、选座
-6. 停在订单确认框前：**人工核对后手动点击“确认”**，随后手动完成支付
-7. 回终端按回车，继续下一笔订单
+3. 浏览器打开 12306 登录页，手机 App 扫码登录
+4. 脚本自动按配置查票、选人、选席别、勾静音车厢、选座
+5. 停在订单确认框前：**人工核对后手动点击“确认”**，随后手动完成支付
+6. 回终端按回车，继续下一笔订单
 
 ## 配置说明
 
@@ -53,12 +54,13 @@ python ticket_bot_v4.py
 | `mode` | `"sale_time"` = 每笔订单按起售时间抢；`"timer"` = 登录后统一倒计时 |
 | `delay_seconds` | `timer` 模式下登录后等待的秒数 |
 | `debug_seat` | `true` = 点预订后暂停，人工查看选座界面 |
-| `mute_car` | `true` = 勾选静音车厢（车次支持时） |
-| `preferred_seat` | 首选座位字母 `A/B/C/D/F`（二等座无 E），留空 `""` = 不选座 |
+| `mute_car` | 全局默认：`true` = 勾选静音车厢；**每笔订单可单独覆盖**（订单内加同名字段） |
+| `preferred_seat` | 全局默认：首选座位字母 `A/B/C/D/F`（二等座无 E），留空 `""` = 不选座；**每笔订单可单独覆盖** |
 | `auto_submit` | `false`（默认）= 停在确认框前人工确认；`true` = 自动确认提交 |
+| `test_mode` | `true` = 停在确认订单页不点“确认”，供核对元素位置 |
 | `orders` | 订单列表，每笔一个对象 |
 | `enabled` | `true` = 抢这单 / `false` = 跳过 |
-| `from_st` / `to_st` | 出发 / 到达站名（中文） |
+| `from_st` / `to_st` | 出发 / 到达站名（中文，须与 12306 站名一致） |
 | `date` | 出发日期，格式 `YYYY-MM-DD` |
 | `sale_time` | 起售时间，格式 `HH:MM`（`sale_time` 模式生效；已过则顺延次日，超 6 小时视为已过直接查） |
 | `depart_time_range` | 出发时段，如 `"08:00-12:00"`；留空 = 不限时段 |
@@ -74,6 +76,12 @@ python ticket_bot_v4.py
 
 ## 更新记录
 
+### 2026-08-18（公开发布版）
+
+- 脚本统一命名为 `ticket_bot.py`（原 `ticket_bot_v4.py` 移除）
+- 示例配置并入 `config.json`（原 `config.example.json` 移除），内容为脱敏示例，无真实姓名 / 行程
+- 新增订单级 `depart_time_range` 配置示例
+
 ### 2026-08（稳定性修复 + 新功能）
 
 - 修复 CDP 监听失效：开启性能日志（`goog:loggingPrefs`），监听覆盖 `queryG/queryZ/queryO/queryA` 轮换端点
@@ -87,9 +95,9 @@ python ticket_bot_v4.py
 
 ## 目录结构
 
-- `ticket_bot_v4.py` — 主脚本
-- `config.example.json` — 订单配置示例（随仓库分发）
-- `config.json` — 本地订单配置（已在 `.gitignore` 中，个人信息只填在这里）
+- `ticket_bot.py` — 主脚本
+- `config.json` — 订单配置（脱敏示例，随仓库分发；请改成你自己的行程）
+- `ticket_log_v4.txt` — 本地运行日志（自动生成，含行程信息，已在 `.gitignore`）
 
 ## License
 
