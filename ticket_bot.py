@@ -113,6 +113,7 @@ class TicketBot:
     WARNING_DIALOG_OK_XPATH = "//a[@id='qd_closeDefaultWarningWindowDialog_id']"
     # 点确认后弹出的学生票资质核验提示弹窗的确定按钮
     XSPN_DIALOG_OK_XPATH = "//a[@id='conf_xspnalert']"
+    CONFIRM_DIALOG_IDS = ("conf_jytsalert", "conf_xspnalert")
     # 确认订单后、支付页前的过渡层（自动几秒后关闭，需等它消失才能转其他订单）
     DHX_OVERLAY_XPATH = "//div[contains(@id,'dhxMainCont')]"
     # 顶部"车票"导航（从支付页等页面切回查票页用）
@@ -460,6 +461,9 @@ class TicketBot:
         if preferred_seat:
             self._try_select_seat(preferred_seat)
 
+        # 这些提示可能异步出现，确认后才能继续操作订单确认页。
+        self._click_confirmation_dialogs(timeout=3)
+
         # 测试模式：停在确认订单页，不点"确认"按钮，供人工核对各元素位置
         if self.test_mode:
             log("  测试模式：已停在确认订单页，不会点击“确认”按钮")
@@ -472,7 +476,7 @@ class TicketBot:
             log("  已就绪：请人工核对确认框内的车次/乘车人/席别/座位，手动点击“确认”完成下单")
             input("  核对并手动确认后，按回车继续下一笔订单...")
             # 点确认后可能弹出学生票资质核验提示弹窗，自动关掉
-            self._close_xspn_dialog()
+            self._click_confirmation_dialogs(timeout=5)
             # 等待支付过渡层完全消失，再转下一笔订单
             self._wait_dhx_overlay_gone()
             log("  请尽快完成支付；未支付前 12306 无法购买其他车票")
@@ -482,7 +486,7 @@ class TicketBot:
         try:
             self.driver.find_element(By.ID, "qr_submit_id").click()
             log("  已确认，等待系统处理...")
-            self._close_xspn_dialog()
+            self._click_confirmation_dialogs(timeout=5)
             self._wait_dhx_overlay_gone()
             return self._wait_order_result()
         except Exception:
@@ -555,6 +559,50 @@ class TicketBot:
                     self.driver.switch_to.default_content()
             time.sleep(0.2)
         return None
+
+    def _click_confirmation_dialogs(self, timeout=3):
+        """点击静音车厢/学生资质弹窗的确认按钮，兼容 iframe 和异步出现。"""
+        deadline = time.time() + timeout
+        clicked = False
+        while time.time() < deadline:
+            found = False
+            try:
+                self.driver.switch_to.default_content()
+                frames = list(self.driver.find_elements(By.TAG_NAME, "iframe"))
+            except Exception:
+                frames = []
+
+            for frame in [None] + frames:
+                try:
+                    self.driver.switch_to.default_content()
+                    if frame is not None:
+                        self.driver.switch_to.frame(frame)
+                    for dialog_id in self.CONFIRM_DIALOG_IDS:
+                        for button in self.driver.find_elements(By.ID, dialog_id):
+                            if not button.is_displayed() or not button.is_enabled():
+                                continue
+                            try:
+                                button.click()
+                            except Exception:
+                                self.driver.execute_script("arguments[0].click();", button)
+                            log(f"  已自动确认弹窗: {dialog_id}")
+                            clicked = found = True
+                            time.sleep(0.15)
+                except Exception:
+                    continue
+
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+            if not found and clicked:
+                break
+            time.sleep(0.1)
+        try:
+            self.driver.switch_to.default_content()
+        except Exception:
+            pass
+        return clicked
 
     # ============ 静音车厢 / 选座（车次不支持则跳过） ============
     def _close_student_dialog(self):
