@@ -20,10 +20,12 @@ import re
 import time
 import traceback
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -87,6 +89,53 @@ def load_config(path=CONFIG_FILE):
         if not line.lstrip().startswith("//")
     ]
     return json.loads("\n".join(lines))
+
+
+def _version_parts(version):
+    return tuple(int(part) for part in re.findall(r"\d+", version or ""))
+
+
+def find_cached_chromedriver(chrome_version, cache_root=None):
+    """返回与 Chrome 主版本/构建号匹配的 Selenium 缓存驱动路径。"""
+    target_version = _version_parts(chrome_version)
+    if not target_version:
+        return None
+
+    if cache_root is None:
+        cache_root = Path(
+            os.environ.get("SE_CACHE_PATH", Path.home() / ".cache" / "selenium")
+        )
+    driver_name = "chromedriver.exe" if os.name == "nt" else "chromedriver"
+    driver_root = Path(cache_root) / "chromedriver" / "win64"
+    if not driver_root.is_dir():
+        return None
+
+    candidates = []
+    for version_dir in driver_root.iterdir():
+        driver_path = version_dir / driver_name
+        version = _version_parts(version_dir.name)
+        if not driver_path.is_file() or not version or version[0] != target_version[0]:
+            continue
+        # Chrome for Testing 的补丁号可以不同，但构建号相同优先。
+        matching_build = int(version[:3] == target_version[:3])
+        candidates.append((matching_build, version, driver_path))
+
+    return str(max(candidates)[2]) if candidates else None
+
+
+def get_installed_chrome_version():
+    """从 Windows 注册表读取 Chrome 版本，避免启动 chrome.exe 进行探测。"""
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon"
+        ) as key:
+            return winreg.QueryValueEx(key, "version")[0]
+    except OSError:
+        return None
 
 
 class TicketBot:
@@ -215,13 +264,21 @@ class TicketBot:
         opts = Options()
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_version = get_installed_chrome_version()
+        chromedriver_path = find_cached_chromedriver(chrome_version)
+        service = None
+        if chromedriver_path:
+            service = Service(executable_path=chromedriver_path)
+            log(f"  使用缓存 ChromeDriver: {Path(chromedriver_path).parent.name}")
+        else:
+            log("  未找到匹配的缓存 ChromeDriver，使用 Selenium 自动解析")
         # 关键：开启性能日志，CDP 网络监听（get_log("performance")）才能读到查票接口
         opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
         # Chrome 启动偶发闪退（更新中/进程冲突），重试 3 次
         for attempt in range(1, 4):
             try:
-                self.driver = webdriver.Chrome(opts)
+                self.driver = webdriver.Chrome(options=opts, service=service)
                 break
             except Exception as e:
                 log(f"  Chrome 启动失败（第{attempt}/3次）: {str(e)[:120]}")
