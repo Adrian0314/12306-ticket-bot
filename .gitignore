@@ -1,8 +1,7 @@
-# 仓库内的 config.json 是脱敏示例（无真实姓名/行程）。
-# 修改成自己的行程后，请勿提交到公开仓库：
-#   1. 建议使用私有仓库；或
-#   2. 先执行 git rm --cached config.json 再把它加回本文件（gitignore 对已跟踪文件无效）
-# 注意：本文件只对"未跟踪"的文件生效，config.json 一旦入库修改即会被跟踪。
+# ===== 个人信息保护 =====
+# config.json 已取消 git 跟踪：本地填入真实行程/乘车人后严禁再提交或上传
+# （gitignore 对已跟踪文件无效，如需重新跟踪请先 git rm --cached config.json）
+config.json
 
 # 运行日志：可能含行程与订单信息
 ticket_log_v4.txt
@@ -10,9 +9,3 @@ ticket_log_v4.txt
 # Python
 __pycache__/
 *.pyc
-
-# ===== 个人信息保护（本地添加）=====
-# config.json 修改为真实行程后严禁提交/上传
-config.json
-# 本地配置编辑器也不入库
-config_editor.html

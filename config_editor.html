@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>12306 抢票配置编辑器</title>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#ffffff; --line:#e5e7eb; --text:#1f2937; --muted:#6b7280;
+  --acc:#2563eb; --acc-soft:#eff6ff; --danger:#dc2626; --danger-soft:#fef2f2;
+  --warn:#b45309; --warn-soft:#fffbeb; --ok:#15803d;
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  font-size:14px;line-height:1.6}
+.wrap{max-width:880px;margin:0 auto;padding:0 16px}
+
+header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 0}
+.head-wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-size:18px;margin:0}
+.sub{margin:2px 0 0;font-size:12px;color:var(--muted)}
+.privacy{font-size:12px;color:var(--ok);background:#f0fdf4;border:1px solid #bbf7d0;
+  border-radius:999px;padding:4px 12px;white-space:nowrap}
+
+main{padding:18px 0 48px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px}
+.spacer{flex:1}
+
+.btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--text);
+  border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer;transition:.15s}
+.btn:hover{border-color:#c7cbd4;background:#fafafa}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.primary:hover{background:#1d4fd8}
+.btn.sm{padding:4px 10px;font-size:12px;border-radius:7px}
+.btn.danger{color:var(--danger)}
+.btn.danger:hover{background:var(--danger-soft);border-color:#fecaca}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.sec-title{font-size:14px;font-weight:600;margin:20px 0 8px;color:var(--text)}
+.sec-head{display:flex;align-items:center;justify-content:space-between;margin:20px 0 8px}
+.sec-head .sec-title{margin:0}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px 16px}
+.grid.toggles{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.hint{font-size:11px;color:#9ca3af;margin-top:3px;line-height:1.45}
+
+input[type=text],input[type=number],input[type=date],input[type=time],select{
+  width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;
+  font:inherit;background:#fff;color:var(--text)}
+input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+input[type=radio]{accent-color:var(--acc)}
+
+.switch{display:flex;align-items:flex-start;gap:8px;cursor:pointer;user-select:none}
+.switch input{appearance:none;flex:none;width:36px;height:20px;border-radius:999px;
+  background:#d1d5db;position:relative;transition:.15s;cursor:pointer;margin-top:2px}
+.switch input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;
+  border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.switch input:checked{background:var(--acc)}
+.switch input:checked::after{left:18px}
+.switch .sw-text b{display:block;font-size:13px;font-weight:600}
+.switch .sw-text span{font-size:11px;color:var(--muted)}
+
+.range-row{display:flex;align-items:center;gap:6px}
+.range-row input[type=time]{flex:1;min-width:0}
+
+.order{border:1px solid var(--line);border-radius:12px;background:#fff;margin-bottom:14px;overflow:hidden}
+.order>header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fafbfc;
+  border-bottom:1px solid var(--line);flex-wrap:wrap}
+.order .o-title{font-weight:600;font-size:13px;flex:1;min-width:160px}
+.order .body{padding:14px 16px}
+.order.off .body,.order.off>header{opacity:.55}
+.pax-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.pax-row input{max-width:260px}
+.add-order{width:100%;border:1px dashed #c7cbd4;background:transparent;color:var(--muted);
+  border-radius:12px;padding:12px;font:inherit;cursor:pointer}
+.add-order:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-soft)}
+.del-pax{border:none;background:transparent;color:var(--muted);font-size:16px;cursor:pointer;
+  padding:2px 6px;border-radius:6px}
+.del-pax:hover{color:var(--danger);background:var(--danger-soft)}
+
+.empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:56px 16px;text-align:center}
+.empty .big{font-size:15px;font-weight:600}
+.empty p{margin:0;color:var(--muted);font-size:13px}
+.empty .btns{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;justify-content:center}
+
+#msg:empty{display:none}
+.msg-err,.msg-warn{border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px}
+.msg-err{background:var(--danger-soft);border:1px solid #fecaca;color:var(--danger)}
+.msg-warn{background:var(--warn-soft);border:1px solid #fde68a;color:var(--warn)}
+.msg-err li,.msg-warn li{margin:2px 0}
+
+footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-height:1.8}
+
+#modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;
+  align-items:center;justify-content:center;padding:20px;z-index:50}
+#modal[hidden]{display:none}
+.modal-card{background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:85vh;
+  display:flex;flex-direction:column;overflow:hidden}
+.modal-card header{display:flex;align-items:center;justify-content:space-between;
+  padding:12px 16px;border-bottom:1px solid var(--line);background:#fff}
+.modal-card h3{margin:0;font-size:14px}
+.modal-card pre{margin:0;padding:16px;overflow:auto;background:#f8fafc;
+  font-family:Consolas,"Courier New",monospace;font-size:12px;line-height:1.55;flex:1}
+.modal-foot{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);
+  background:#111827;color:#fff;border-radius:10px;padding:9px 18px;font-size:13px;
+  opacity:0;pointer-events:none;transition:.2s;z-index:60;max-width:80vw}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.ok{background:#14532d}
+#toast.err{background:#7f1d1d}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap head-wrap">
+    <div>
+      <h1>12306 抢票配置编辑器</h1>
+      <p class="sub">快速修改 ticket_bot 的 config.json · 保存后运行 python ticket_bot.py 生效</p>
+    </div>
+    <div class="privacy">🔒 纯本地工具 · 无任何网络请求</div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="msg"></div>
+
+  <div class="toolbar card" id="toolbar" hidden>
+    <button class="btn primary" id="btnOpen">📂 打开 config.json</button>
+    <button class="btn" id="btnNew">✚ 新建空白配置</button>
+    <div class="spacer"></div>
+    <button class="btn" id="btnPreview">👁 预览 JSON</button>
+    <button class="btn primary" id="btnSave">💾 保存</button>
+    <button class="btn" id="btnDownload">⬇ 下载副本</button>
+    <input type="file" id="fileInput" accept=".json,application/json" hidden>
+  </div>
+
+  <section id="empty" class="card empty">
+    <div class="big">还没有载入配置</div>
+    <p>点击「打开 config.json」导入现有配置继续编辑，<br>或「新建空白配置」从头填写你的行程。</p>
+    <div class="btns">
+      <button class="btn primary" id="btnOpen2">📂 打开 config.json</button>
+      <button class="btn" id="btnNew2">✚ 新建空白配置</button>
+    </div>
+    <p style="margin-top:14px">也可以把 config.json 直接拖进本页面</p>
+  </section>
+
+  <section id="editor" hidden>
+    <h2 class="sec-title">全局设置</h2>
+    <div class="card">
+      <div class="grid">
+        <div class="field">
+          <label>抢票模式 mode</label>
+          <div style="display:flex;gap:16px;margin-top:4px">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+              <input type="radio" name="mode" value="sale_time"> 按起售时间
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+              <input type="radio" name="mode" value="timer"> 统一倒计时
+            </label>
+          </div>
+          <div class="hint">sale_time：等每笔订单的起售时刻再抢<br>timer：登录后等 delay_seconds 秒统一开抢</div>
+        </div>
+        <div class="field">
+          <label>登录后等待秒数 delay_seconds</label>
+          <input type="number" id="g-delay" min="0" step="1">
+          <div class="hint">仅 timer 模式生效，0 表示登录后立即开抢</div>
+        </div>
+        <div class="field">
+          <label>全局首选座位 preferred_seat</label>
+          <select id="g-seat">
+            <option value="">不选座</option>
+            <option value="A">A（靠窗）</option>
+            <option value="B">B（中间）</option>
+            <option value="C">C（过道）</option>
+            <option value="D">D（过道）</option>
+            <option value="F">F（靠窗）</option>
+          </select>
+          <div class="hint">二等座没有 E 座；每笔订单可单独覆盖</div>
+        </div>
+      </div>
+      <div class="grid toggles" style="margin-top:14px">
+        <label class="switch"><input type="checkbox" id="g-mute">
+          <span class="sw-text"><b>静音车厢</b><span>全局默认，车次不支持时自动跳过</span></span></label>
+        <label class="switch"><input type="checkbox" id="g-auto">
+          <span class="sw-text"><b>自动确认提交 auto_submit</b><span>关：停在确认框前人工确认（推荐）</span></span></label>
+        <label class="switch"><input type="checkbox" id="g-test">
+          <span class="sw-text"><b>测试模式 test_mode</b><span>开：走到确认页就停，不点“确认”，用于试流程</span></span></label>
+        <label class="switch"><input type="checkbox" id="g-debug">
+          <span class="sw-text"><b>调试选座 debug_seat</b><span>点预订后暂停，人工查看选座界面</span></span></label>
+      </div>
+    </div>
+
+    <div class="sec-head">
+      <h2 class="sec-title">订单</h2>
+      <button class="btn sm" id="btnAddOrder">✚ 添加订单</button>
+    </div>
+    <div id="orders"></div>
+  </section>
+
+  <footer>
+    🔒 本页面是纯静态本地文件，不发起任何网络请求、不使用 localStorage；<br>
+    你的信息只存在于你打开/保存的 config.json 中。含真实信息的 config.json 请勿提交到仓库或上传网络。
+  </footer>
+</main>
+
+<div id="modal" hidden>
+  <div class="modal-card">
+    <header>
+      <h3>config.json 预览（含注释，脚本可直接读取）</h3>
+      <button class="btn sm" id="btnCloseModal">✕ 关闭</button>
+    </header>
+    <pre id="previewText"></pre>
+    <div class="modal-foot">
+      <button class="btn sm" id="btnCopy">复制内容</button>
+      <button class="btn sm primary" id="btnSaveFromModal">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ==================== 纯逻辑部分（无 DOM） ==================== */
+/*PURE-START*/
+
+// 与 ticket_bot.py 的 load_config 一致：忽略整行 // 注释后按 JSON 解析
+function stripComments(text){
+  return text.replace(/^\uFEFF/, "").split(/\r?\n/)
+    .filter(function(line){ return line.replace(/^\s+/, "").indexOf("//") !== 0; })
+    .join("\n");
+}
+
+function newBlankState(){
+  return {
+    mode: "sale_time",
+    delay_seconds: 5,
+    debug_seat: false,
+    mute_car: false,
+    preferred_seat: "",
+    auto_submit: false,
+    test_mode: false,
+    orders: [ newBlankOrder() ]
+  };
+}
+
+function newBlankOrder(){
+  return {
+    enabled: true,
+    from_st: "", to_st: "", date: "",
+    sale_time: "", depart_time_range: "",
+    seat_type: "二等座",
+    mute_car: null,          // null = 跟随全局
+    preferred_seat: null,    // null = 跟随全局；"" = 不选座；"A".."F"
+    passengers: [ "" ]
+  };
+}
+
+// 把 config.json 的对象映射为编辑器 state
+function stateFromConfig(cfg){
+  var s = newBlankState();
+  s.orders = [];
+  s.mode = cfg.mode === "timer" ? "timer" : "sale_time";
+  s.delay_seconds = Number(cfg.delay_seconds);
+  if (!isFinite(s.delay_seconds) || s.delay_seconds < 0) s.delay_seconds = 5;
+  s.debug_seat = !!cfg.debug_seat;
+  s.mute_car = !!cfg.mute_car;
+  s.preferred_seat = typeof cfg.preferred_seat === "string" ? cfg.preferred_seat : "";
+  s.auto_submit = !!cfg.auto_submit;
+  s.test_mode = !!cfg.test_mode;
+  var orders = Array.isArray(cfg.orders) ? cfg.orders : [];
+  for (var i = 0; i < orders.length; i++){
+    var o = orders[i] || {};
+    var no = newBlankOrder();
+    no.enabled = o.enabled !== false;
+    no.from_st = String(o.from_st || "");
+    no.to_st = String(o.to_st || "");
+    no.date = String(o.date || "");
+    no.sale_time = o.sale_time == null ? "" : String(o.sale_time);
+    no.depart_time_range = String(o.depart_time_range || "");
+    no.seat_type = String(o.seat_type || "二等座");
+    no.mute_car = ("mute_car" in o) ? !!o.mute_car : null;
+    no.preferred_seat = ("preferred_seat" in o) ? String(o.preferred_seat || "") : null;
+    var pax = Array.isArray(o.passengers) ? o.passengers : [];
+    no.passengers = pax.map(function(p){
+      if (typeof p === "string") return p;
+      return String((p && p.name) || "");
+    });
+    if (no.passengers.length === 0) no.passengers = [""];
+    s.orders.push(no);
+  }
+  if (s.orders.length === 0) s.orders = [ newBlankOrder() ];
+  return s;
+}
+
+// 编辑器 state → config.json 对象（与脚本字段一一对应）
+function configFromState(s){
+  return {
+    mode: s.mode,
+    delay_seconds: Math.max(0, Math.round(Number(s.delay_seconds) || 0)),
+    debug_seat: !!s.debug_seat,
+    mute_car: !!s.mute_car,
+    preferred_seat: s.preferred_seat || "",
+    auto_submit: !!s.auto_submit,
+    test_mode: !!s.test_mode,
+    orders: s.orders.map(function(o){
+      var co = {
+        enabled: !!o.enabled,
+        from_st: o.from_st.trim(),
+        to_st: o.to_st.trim(),
+        date: o.date.trim(),
+        sale_time: o.sale_time.trim(),
+        depart_time_range: o.depart_time_range.trim(),
+        seat_type: o.seat_type
+      };
+      if (o.mute_car !== null) co.mute_car = !!o.mute_car;
+      if (o.preferred_seat !== null) co.preferred_seat = o.preferred_seat;
+      co.passengers = o.passengers
+        .map(function(n){ return n.trim(); })
+        .filter(function(n){ return n.length > 0; })
+        .map(function(n){ return { name: n }; });
+      return co;
+    })
+  };
+}
+
+// 生成带 // 注释的 config.json 文本（注释均为整行，与脚本解析规则兼容）
+// 每个键是一个“块”（注释行 + JSON 行），逗号只追加在块最后一行，避免截断多行数组
+function serializeConfig(s){
+  var out = [];
+  function push(ind, str){ out.push(new Array(ind + 1).join(" ") + str); }
+  var q = JSON.stringify;
+
+  function blk(comment, jsonLines){
+    var b = comment ? [comment] : [];
+    return b.concat(jsonLines);
+  }
+
+  function orderBlocks(o){
+    var blocks = [];
+    blocks.push(blk("// true = 执行这笔订单，false = 跳过", ['"enabled": ' + !!o.enabled]));
+    blocks.push(blk("// 出发站（中文，必须与 12306 站名一致）", ['"from_st": ' + q(o.from_st.trim())]));
+    blocks.push(blk("// 到达站", ['"to_st": ' + q(o.to_st.trim())]));
+    blocks.push(blk("// 出发日期，格式 YYYY-MM-DD", ['"date": ' + q(o.date.trim())]));
+    blocks.push(blk("// 起售时间，格式 HH:MM（sale_time 模式下生效；不确定留空 \"\"）", ['"sale_time": ' + q(o.sale_time.trim())]));
+    blocks.push(blk("// 出发时段筛选，如 \"08:00-12:00\"；\"\" = 不限时段", ['"depart_time_range": ' + q(o.depart_time_range.trim())]));
+    blocks.push(blk("// 席别: 二等座 / 一等座 / 商务座 / 硬座 / 无座", ['"seat_type": ' + q(o.seat_type)]));
+    if (o.mute_car !== null)
+      blocks.push(blk("// 本笔订单是否勾静音车厢（省略则用全局默认）", ['"mute_car": ' + !!o.mute_car]));
+    if (o.preferred_seat !== null)
+      blocks.push(blk("// 本笔订单首选座位（省略则用全局默认）", ['"preferred_seat": ' + q(o.preferred_seat)]));
+    var names = o.passengers.map(function(n){ return n.trim(); })
+                  .filter(function(n){ return n.length > 0; });
+    var paxLines = ['"passengers": ['];
+    names.forEach(function(n, k){
+      paxLines.push("        { \"name\": " + q(n) + " }" + (k < names.length - 1 ? "," : ""));
+    });
+    paxLines.push("      ]");
+    blocks.push(blk("// 乘车人：姓名必须与 12306 常用联系人完全一致", paxLines));
+    return blocks;
+  }
+
+  push(0, "{");
+  push(2, "// ===== 全局设置 =====");
+  var globals = [
+    ["// 抢票模式: \"sale_time\" = 按每笔订单的起售时间抢票; \"timer\" = 登录后统一倒计时", "\"mode\": " + q(s.mode)],
+    ["// timer 模式下，登录成功后等待的秒数", "\"delay_seconds\": " + Math.max(0, Math.round(Number(s.delay_seconds) || 0))],
+    ["// 调试用: true = 点预订后暂停，人工查看选座界面；平时保持 false", "\"debug_seat\": " + !!s.debug_seat],
+    ["// 全局默认: 是否勾选静音车厢（车次不支持时自动跳过）；每笔订单可单独覆盖", "\"mute_car\": " + !!s.mute_car],
+    ["// 全局默认: 首选座位字母 A/B/C/D/F（二等座无 E 座），\"\" = 不选座；每笔订单可单独覆盖", "\"preferred_seat\": " + q(s.preferred_seat || "")],
+    ["// true = 自动确认提交订单（付款仍由人工完成）；false（默认）= 停在确认框前人工确认", "\"auto_submit\": " + !!s.auto_submit],
+    ["// 测试模式: true = 走到确认订单页后停下核对，不点\"确认\"；false = 正常下单", "\"test_mode\": " + !!s.test_mode]
+  ];
+  globals.forEach(function(g){
+    push(2, g[0]);
+    push(2, g[1] + ",");
+  });
+  push(2, "// 订单列表：每笔订单的线路、日期、乘车人完全独立，可配置多笔");
+  push(2, "\"orders\": [");
+
+  s.orders.forEach(function(o, i){
+    var blocks = orderBlocks(o);
+    push(4, "{");
+    blocks.forEach(function(b, k){
+      for (var j = 0; j < b.length; j++){
+        var line = b[j];
+        if (k < blocks.length - 1 && j === b.length - 1) line += ",";
+        push(6, line);
+      }
+    });
+    push(4, "}" + (i < s.orders.length - 1 ? "," : ""));
+  });
+
+  push(2, "]");
+  push(0, "}");
+  return out.join("\n") + "\n";
+}
+
+var TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+var RANGE_RE = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function daysFromToday(dateStr){
+  var m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  var target = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  var now = new Date();
+  var today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target - today) / 86400000);
+}
+
+// 校验：errors 阻止保存，warnings 仅提示
+function validateState(s){
+  var errors = [], warnings = [];
+  var enabledCount = 0;
+  s.orders.forEach(function(o, i){
+    var tag = "订单 " + (i + 1);
+    if (!o.enabled) return;
+    enabledCount++;
+    if (!o.from_st.trim()) errors.push(tag + "：缺少出发站");
+    if (!o.to_st.trim()) errors.push(tag + "：缺少到达站");
+    if (!o.date.trim()){
+      errors.push(tag + "：缺少出发日期");
+    } else {
+      if (!DATE_RE.test(o.date.trim()))
+        errors.push(tag + "：日期格式应为 YYYY-MM-DD");
+      else {
+        var d = daysFromToday(o.date.trim());
+        if (d !== null && d < 0) warnings.push(tag + "：出发日期已经过去，抢票无意义");
+        if (d !== null && d > 15) warnings.push(tag + "：出发日期在 15 天之后，可能超出 12306 预售期");
+      }
+    }
+    var st = o.sale_time.trim();
+    if (st && !TIME_RE.test(st)) errors.push(tag + "：起售时间格式应为 HH:MM");
+    var rg = o.depart_time_range.trim();
+    if (rg){
+      if (!RANGE_RE.test(rg)) errors.push(tag + "：出发时段格式应为 HH:MM-HH:MM");
+      else if (rg.slice(0,5) >= rg.slice(6)) warnings.push(tag + "：出发时段的起始时间晚于结束时间");
+    }
+    var names = o.passengers.map(function(n){ return n.trim(); }).filter(function(n){ return n.length > 0; });
+    if (names.length === 0) errors.push(tag + "：至少需要一名乘车人");
+    var seen = {};
+    names.forEach(function(n){
+      if (seen[n]) warnings.push(tag + "：乘车人「" + n + "」重复填写");
+      seen[n] = 1;
+    });
+  });
+  if (s.orders.length === 0) errors.push("至少需要一笔订单");
+  if (enabledCount === 0 && s.orders.length > 0) warnings.push("所有订单均已停用（enabled=false），脚本不会抢任何车票");
+  if (s.mode === "sale_time"){
+    var noSale = s.orders.filter(function(o){ return o.enabled && !o.sale_time.trim(); }).length;
+    if (noSale > 0) warnings.push(noSale + " 笔订单未填起售时间，脚本将直接开始查询");
+  }
+  if (s.test_mode) warnings.push(s.auto_submit
+    ? "测试模式开启时不会真正提交订单（auto_submit 不生效）"
+    : "当前为测试模式：流程会停在确认订单页，不会真正下单");
+  return { errors: errors, warnings: warnings };
+}
+/*PURE-END*/
+
+/* ==================== DOM 交互 ==================== */
+var $ = function(sel){ return document.querySelector(sel); };
+var state = null;
+var fileHandle = null;   // File System Access API 句柄（Chrome）
+var loadedName = "";
+
+function toast(msg, type){
+  var t = $("#toast");
+  t.textContent = msg;
+  t.className = "show " + (type || "");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function(){ t.className = ""; }, 2600);
+}
+
+function showMsg(errors, warnings){
+  var box = $("#msg");
+  box.innerHTML = "";
+  function make(cls, title, arr){
+    var div = document.createElement("div");
+    div.className = cls;
+    var b = document.createElement("b");
+    b.textContent = title;
+    div.appendChild(b);
+    var ul = document.createElement("ul");
+    ul.style.margin = "4px 0 0";
+    arr.forEach(function(m){
+      var li = document.createElement("li");
+      li.textContent = m;
+      ul.appendChild(li);
+    });
+    div.appendChild(ul);
+    return div;
+  }
+  if (errors && errors.length) box.appendChild(make("msg-err", "⚠ 存在以下问题，保存前请修正：", errors));
+  if (warnings && warnings.length) box.appendChild(make("msg-warn", "提示（不影响保存）：", warnings));
+}
+
+function refreshMsg(){
+  if (!state) return;
+  var v = validateState(state);
+  showMsg(v.errors, v.warnings);
+}
+
+/* ---------- 渲染 ---------- */
+function renderAll(){
+  $("#empty").hidden = true;
+  $("#editor").hidden = false;
+  $("#toolbar").hidden = false;
+  renderGlobals();
+  renderOrders();
+  refreshMsg();
+}
+
+function renderGlobals(){
+  document.querySelectorAll("input[name=mode]").forEach(function(r){
+    r.checked = (r.value === state.mode);
+  });
+  $("#g-delay").value = state.delay_seconds;
+  $("#g-seat").value = state.preferred_seat || "";
+  $("#g-mute").checked = !!state.mute_car;
+  $("#g-auto").checked = !!state.auto_submit;
+  $("#g-test").checked = !!state.test_mode;
+  $("#g-debug").checked = !!state.debug_seat;
+}
+
+function orderTitle(o, i){
+  var parts = [];
+  if (o.from_st.trim() && o.to_st.trim()) parts.push(o.from_st.trim() + " → " + o.to_st.trim());
+  if (o.date.trim()) parts.push(o.date.trim());
+  var names = o.passengers.map(function(n){ return n.trim(); }).filter(Boolean);
+  if (names.length) parts.push(names.join("、"));
+  return "订单 " + (i + 1) + (parts.length ? " · " + parts.join(" · ") : "");
+}
+
+function seatOptions(selected){
+  // selected: null=跟随全局, ""=不选座, "A".."F"
+  var opts = [
+    ["inherit", "跟随全局"],
+    ["none", "不选座"],
+    ["A", "A（靠窗）"], ["B", "B（中间）"], ["C", "C（过道）"],
+    ["D", "D（过道）"], ["F", "F（靠窗）"]
+  ];
+  var cur = selected === null ? "inherit" : (selected === "" ? "none" : selected);
+  return opts.map(function(o){
+    return '<option value="' + o[0] + '"' + (o[0] === cur ? " selected" : "") + ">" + o[1] + "</option>";
+  }).join("");
+}
+
+function renderOrders(){
+  var box = $("#orders");
+  box.innerHTML = "";
+  state.orders.forEach(function(o, i){
+    var card = document.createElement("div");
+    card.className = "order" + (o.enabled ? "" : " off");
+    card.dataset.i = i;
+
+    var head = document.createElement("header");
+    var title = document.createElement("span");
+    title.className = "o-title";
+    title.textContent = orderTitle(o, i);
+    head.appendChild(title);
+
+    var enLabel = document.createElement("label");
+    enLabel.className = "switch";
+    enLabel.style.flex = "none";
+    var en = document.createElement("input");
+    en.type = "checkbox";
+    en.checked = !!o.enabled;
+    en.dataset.act = "enabled";
+    enLabel.appendChild(en);
+    var enText = document.createElement("span");
+    enText.className = "sw-text";
+    enText.innerHTML = "<b>启用</b>";
+    enLabel.appendChild(enText);
+    head.appendChild(enLabel);
+
+    function mkBtn(text, act, cls){
+      var b = document.createElement("button");
+      b.className = "btn sm " + (cls || "");
+      b.textContent = text;
+      b.dataset.act = act;
+      return b;
+    }
+    head.appendChild(mkBtn("复制", "dup"));
+    head.appendChild(mkBtn("删除", "del", "danger"));
+    card.appendChild(head);
+
+    var body = document.createElement("div");
+    body.className = "body";
+
+    function field(label, inner, hint){
+      var d = document.createElement("div");
+      d.className = "field";
+      var l = document.createElement("label");
+      l.textContent = label;
+      d.appendChild(l);
+      d.appendChild(inner);
+      if (hint){
+        var h = document.createElement("div");
+        h.className = "hint";
+        h.textContent = hint;
+        d.appendChild(h);
+      }
+      return d;
+    }
+    function input(type, val, f){
+      var el = document.createElement("input");
+      el.type = type;
+      el.value = val;
+      el.dataset.f = f;
+      return el;
+    }
+    function select(html, f){
+      var el = document.createElement("select");
+      el.innerHTML = html;
+      el.dataset.f = f;
+      return el;
+    }
+
+    var g1 = document.createElement("div");
+    g1.className = "grid";
+    g1.appendChild(field("出发站 from_st", input("text", o.from_st, "from_st"), "如：北京南"));
+    g1.appendChild(field("到达站 to_st", input("text", o.to_st, "to_st"), "如：上海虹桥"));
+    g1.appendChild(field("出发日期 date", input("date", o.date, "date")));
+    g1.appendChild(field("席别 seat_type", select(
+      ["二等座","一等座","商务座","特等座","硬座","无座"].map(function(x){
+        return '<option value="' + x + '"' + (x === o.seat_type ? " selected" : "") + ">" + x + "</option>";
+      }).join(""), "seat_type")));
+    body.appendChild(g1);
+
+    var g2 = document.createElement("div");
+    g2.className = "grid";
+    g2.appendChild(field("起售时间 sale_time", input("time", o.sale_time, "sale_time"),
+      "sale_time 模式生效；按出发站起售时间填"));
+    var rangeField = document.createElement("div");
+    rangeField.className = "field";
+    rangeField.innerHTML = "<label>出发时段 depart_time_range</label>";
+    var rr = document.createElement("div");
+    rr.className = "range-row";
+    var unlimited = o.depart_time_range.trim() === "";
+    var parts = unlimited ? ["", ""] : o.depart_time_range.trim().split("-");
+    var cb = document.createElement("input");
+    cb.type = "checkbox"; cb.id = "rng" + i; cb.checked = unlimited; cb.dataset.f = "range_unlimited";
+    var cbl = document.createElement("label");
+    cbl.htmlFor = "rng" + i; cbl.textContent = "不限"; cbl.style.cursor = "pointer";
+    cbl.style.whiteSpace = "nowrap"; cbl.style.fontSize = "13px";
+    var t1 = input("time", parts[0] || "", "range_start");
+    var dash = document.createElement("span"); dash.textContent = "–";
+    var t2 = input("time", parts[1] || "", "range_end");
+    [t1, t2].forEach(function(t){ t.disabled = unlimited; });
+    rr.appendChild(t1); rr.appendChild(dash); rr.appendChild(t2); rr.appendChild(cb); rr.appendChild(cbl);
+    rangeField.appendChild(rr);
+    g2.appendChild(rangeField);
+    g2.appendChild(field("静音车厢", select(
+      '<option value="inherit">跟随全局</option>' +
+      '<option value="on"' + (o.mute_car === true ? " selected" : "") + '>勾选</option>' +
+      '<option value="off"' + (o.mute_car === false ? " selected" : "") + '>不勾选</option>',
+      "mute_car_sel"), "车次支持时才有效"));
+    g2.appendChild(field("本单首选座位", select(seatOptions(o.preferred_seat), "seat_sel")));
+    body.appendChild(g2);
+
+    var paxLabel = document.createElement("div");
+    paxLabel.className = "field";
+    paxLabel.style.marginTop = "12px";
+    paxLabel.innerHTML = "<label>乘车人 passengers（姓名须与 12306 常用联系人完全一致）</label>";
+    var paxBox = document.createElement("div");
+    paxBox.dataset.pax = i;
+    o.passengers.forEach(function(name, k){
+      paxBox.appendChild(makePaxRow(i, k, name));
+    });
+    paxLabel.appendChild(paxBox);
+    var addPax = document.createElement("button");
+    addPax.className = "btn sm";
+    addPax.textContent = "✚ 添加乘车人";
+    addPax.dataset.act = "add-pax";
+    paxLabel.appendChild(addPax);
+    body.appendChild(paxLabel);
+
+    card.appendChild(body);
+    box.appendChild(card);
+  });
+
+  var add = document.createElement("button");
+  add.className = "add-order";
+  add.textContent = "✚ 添加一笔订单";
+  add.addEventListener("click", function(){
+    state.orders.push(newBlankOrder());
+    renderOrders(); refreshMsg();
+  });
+  box.appendChild(add);
+}
+
+function makePaxRow(oi, pi, name){
+  var row = document.createElement("div");
+  row.className = "pax-row";
+  var inp = document.createElement("input");
+  inp.type = "text";
+  inp.placeholder = "乘车人姓名";
+  inp.value = name;
+  inp.dataset.paxf = "name";
+  inp.dataset.pi = pi;
+  row.appendChild(inp);
+  var del = document.createElement("button");
+  del.className = "del-pax";
+  del.title = "删除此人";
+  del.textContent = "✕";
+  del.dataset.act = "del-pax";
+  del.dataset.pi = pi;
+  row.appendChild(del);
+  return row;
+}
+
+/* ---------- 状态同步 ---------- */
+function getOrderCard(el){
+  var card = el.closest(".order");
+  return card ? state.orders[+card.dataset.i] : null;
+}
+
+document.addEventListener("input", function(e){
+  var t = e.target;
+  if (t.name === "mode"){ if (state){ state.mode = t.value; refreshMsg(); } return; }
+  if (!state) return;
+  if (t.id === "g-delay"){ state.delay_seconds = t.value; return; }
+  if (t.id === "g-seat"){ state.preferred_seat = t.value; return; }
+  if (t.id === "g-mute"){ state.mute_car = t.checked; return; }
+  if (t.id === "g-auto"){ state.auto_submit = t.checked; refreshMsg(); return; }
+  if (t.id === "g-test"){ state.test_mode = t.checked; refreshMsg(); return; }
+  if (t.id === "g-debug"){ state.debug_seat = t.checked; return; }
+
+  var o = getOrderCard(t);
+  if (!o) return;
+  var f = t.dataset.f;
+  if (f === "from_st" || f === "to_st" || f === "date"){
+    o[f] = t.value;
+    var card = t.closest(".order");
+    card.querySelector(".o-title").textContent = orderTitle(o, +card.dataset.i);
+    refreshMsg();
+  } else if (f === "sale_time"){
+    o.sale_time = t.value; refreshMsg();
+  } else if (f === "range_unlimited"){
+    var card2 = t.closest(".order");
+    [ "range_start", "range_end" ].forEach(function(k){
+      card2.querySelector('[data-f="' + k + '"]').disabled = t.checked;
+    });
+    o.depart_time_range = t.checked ? "" : joinRange(card2);
+    refreshMsg();
+  } else if (f === "range_start" || f === "range_end"){
+    o.depart_time_range = joinRange(t.closest(".order"));
+    refreshMsg();
+  } else if (f === "mute_car_sel"){
+    o.mute_car = t.value === "inherit" ? null : (t.value === "on");
+  } else if (f === "seat_sel"){
+    o.preferred_seat = t.value === "inherit" ? null : (t.value === "none" ? "" : t.value);
+  } else if (t.dataset.paxf === "name"){
+    var pi = +t.dataset.pi;
+    var card3 = t.closest(".order");
+    state.orders[+card3.dataset.i].passengers[pi] = t.value;
+    card3.querySelector(".o-title").textContent =
+      orderTitle(state.orders[+card3.dataset.i], +card3.dataset.i);
+    refreshMsg();
+  }
+});
+
+function joinRange(card){
+  var a = card.querySelector('[data-f="range_start"]').value;
+  var b = card.querySelector('[data-f="range_end"]').value;
+  return (a && b) ? (a + "-" + b) : "";
+}
+
+document.addEventListener("click", function(e){
+  var t = e.target.closest("[data-act]");
+  if (!t || !state) return;
+  var card = t.closest(".order");
+  if (!card) return;
+  var i = +card.dataset.i;
+  var act = t.dataset.act;
+  if (act === "enabled"){
+    state.orders[i].enabled = t.checked;
+    card.classList.toggle("off", !t.checked);
+    refreshMsg();
+  } else if (act === "dup"){
+    var copy = JSON.parse(JSON.stringify(state.orders[i]));
+    state.orders.splice(i + 1, 0, copy);
+    renderOrders(); refreshMsg();
+  } else if (act === "del"){
+    if (!confirm("确定删除订单 " + (i + 1) + " 吗？")) return;
+    state.orders.splice(i, 1);
+    if (state.orders.length === 0) state.orders.push(newBlankOrder());
+    renderOrders(); refreshMsg();
+  } else if (act === "add-pax"){
+    state.orders[i].passengers.push("");
+    renderOrders(); refreshMsg();
+  } else if (act === "del-pax"){
+    state.orders[i].passengers.splice(+t.dataset.pi, 1);
+    if (state.orders[i].passengers.length === 0) state.orders[i].passengers.push("");
+    renderOrders(); refreshMsg();
+  }
+});
+
+/* ---------- 载入 / 保存 ---------- */
+function loadText(text, name){
+  var cfg;
+  try {
+    cfg = JSON.parse(stripComments(text));
+  } catch (err){
+    toast("解析失败：不是有效的 config.json（" + err.message + "）", "err");
+    return;
+  }
+  state = stateFromConfig(cfg);
+  loadedName = name || "";
+  renderAll();
+  toast("已载入 " + (name || "配置"), "ok");
+}
+
+async function doOpen(){
+  if (window.showOpenFilePicker){
+    try {
+      var handles = await window.showOpenFilePicker({
+        types: [{ description: "JSON 配置", accept: { "application/json": [".json"] } }],
+        multiple: false
+      });
+      fileHandle = handles[0];
+      var file = await fileHandle.getFile();
+      loadText(await file.text(), file.name);
+      return;
+    } catch (err){
+      if (err && err.name === "AbortError") return;
+      // 其他错误（如浏览器不支持 file:// 下的该 API）→ 走备用方案
+    }
+  }
+  $("#fileInput").value = "";
+  $("#fileInput").click();
+}
+
+$("#fileInput").addEventListener("change", async function(){
+  var f = this.files[0];
+  if (!f) return;
+  loadText(await f.text(), f.name);
+});
+
+function downloadText(text){
+  var blob = new Blob([text], { type: "application/json" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "config.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+  toast("已下载 config.json，请覆盖到脚本目录", "ok");
+}
+
+async function doSave(){
+  if (!state) return;
+  var v = validateState(state);
+  showMsg(v.errors, v.warnings);
+  if (v.errors.length){ toast("有 " + v.errors.length + " 个问题需要先修正", "err"); return; }
+  var text = serializeConfig(state);
+  try {
+    if (fileHandle){
+      var w = await fileHandle.createWritable();
+      await w.write(text);
+      await w.close();
+      toast("已保存到 " + fileHandle.name, "ok");
+      return;
+    }
+    if (window.showSaveFilePicker){
+      try {
+        var h = await window.showSaveFilePicker({
+          suggestedName: "config.json",
+          types: [{ description: "JSON 配置", accept: { "application/json": [".json"] } }]
+        });
+        var w2 = await h.createWritable();
+        await w2.write(text);
+        await w2.close();
+        fileHandle = h;
+        toast("已保存到 " + h.name, "ok");
+        return;
+      } catch (err){
+        if (err && err.name === "AbortError") return;
+      }
+    }
+    downloadText(text);
+  } catch (err){
+    toast("保存失败：" + err.message, "err");
+  }
+}
+
+function openPreview(){
+  if (!state) return;
+  var v = validateState(state);
+  showMsg(v.errors, v.warnings);
+  $("#previewText").textContent = serializeConfig(state);
+  $("#modal").hidden = false;
+}
+
+function doNew(){
+  if (state && !confirm("新建会清空当前编辑内容，确定吗？")) return;
+  state = newBlankState();
+  fileHandle = null;
+  renderAll();
+  toast("已新建空白配置", "ok");
+}
+
+/* ---------- 拖放导入 ---------- */
+document.addEventListener("dragover", function(e){ e.preventDefault(); });
+document.addEventListener("drop", function(e){
+  e.preventDefault();
+  var f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) f.text().then(function(t){ loadText(t, f.name); });
+});
+
+/* ---------- 绑定 ---------- */
+$("#btnOpen").addEventListener("click", doOpen);
+$("#btnOpen2").addEventListener("click", doOpen);
+$("#btnNew").addEventListener("click", doNew);
+$("#btnNew2").addEventListener("click", doNew);
+$("#btnSave").addEventListener("click", doSave);
+$("#btnSaveFromModal").addEventListener("click", function(){
+  $("#modal").hidden = true;
+  doSave();
+});
+$("#btnDownload").addEventListener("click", function(){
+  if (!state) return;
+  var v = validateState(state);
+  showMsg(v.errors, v.warnings);
+  if (v.errors.length){ toast("有 " + v.errors.length + " 个问题需要先修正", "err"); return; }
+  downloadText(serializeConfig(state));
+});
+$("#btnPreview").addEventListener("click", openPreview);
+$("#btnCloseModal").addEventListener("click", function(){ $("#modal").hidden = true; });
+$("#modal").addEventListener("click", function(e){
+  if (e.target === this) this.hidden = true;
+});
+$("#btnCopy").addEventListener("click", function(){
+  var text = $("#previewText").textContent;
+  var btn = this;
+  function fallback(){
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); toast("已复制", "ok"); }
+    catch (e){ toast("复制失败，请手动选择复制", "err"); }
+    ta.remove();
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(
+      function(){ toast("已复制", "ok"); }, fallback);
+  } else fallback();
+});
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape") $("#modal").hidden = true;
+});
+</script>
+</body>
+</html>
