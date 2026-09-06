@@ -1,6 +1,10 @@
 # ===== 个人信息保护 =====
-# config.json 已取消 git 跟踪：本地填入真实行程/乘车人后严禁再提交或上传
-# （gitignore 对已跟踪文件无效，如需重新跟踪请先 git rm --cached config.json）
+# 仓库里的 config.json 是脱敏示例（张三/李四）。
+# 本地真实配置已用 skip-worktree 保护：日常修改不会被 git 提交。
+# 若 git pull 报 config.json 冲突，先临时解除保护：
+#   git update-index --no-skip-worktree config.json
+# 处理完再恢复： git update-index --skip-worktree config.json
+# 严禁把真实姓名/行程提交或上传！
 config.json
 
 # 运行日志：可能含行程与订单信息
