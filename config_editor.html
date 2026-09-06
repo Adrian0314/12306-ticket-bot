@@ -191,8 +191,6 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
           <span class="sw-text"><b>自动确认提交 auto_submit</b><span>关：停在确认框前人工确认（推荐）</span></span></label>
         <label class="switch"><input type="checkbox" id="g-test">
           <span class="sw-text"><b>测试模式 test_mode</b><span>开：走到确认页就停，不点“确认”，用于试流程</span></span></label>
-        <label class="switch"><input type="checkbox" id="g-debug">
-          <span class="sw-text"><b>调试选座 debug_seat</b><span>点预订后暂停，人工查看选座界面</span></span></label>
       </div>
     </div>
 
@@ -241,7 +239,6 @@ function newBlankState(){
   return {
     mode: "sale_time",
     delay_seconds: 5,
-    debug_seat: false,
     mute_car: false,
     preferred_seat: "",
     auto_submit: false,
@@ -269,7 +266,6 @@ function stateFromConfig(cfg){
   s.mode = cfg.mode === "timer" ? "timer" : "sale_time";
   s.delay_seconds = Number(cfg.delay_seconds);
   if (!isFinite(s.delay_seconds) || s.delay_seconds < 0) s.delay_seconds = 5;
-  s.debug_seat = !!cfg.debug_seat;
   s.mute_car = !!cfg.mute_car;
   s.preferred_seat = typeof cfg.preferred_seat === "string" ? cfg.preferred_seat : "";
   s.auto_submit = !!cfg.auto_submit;
@@ -304,7 +300,6 @@ function configFromState(s){
   return {
     mode: s.mode,
     delay_seconds: Math.max(0, Math.round(Number(s.delay_seconds) || 0)),
-    debug_seat: !!s.debug_seat,
     mute_car: !!s.mute_car,
     preferred_seat: s.preferred_seat || "",
     auto_submit: !!s.auto_submit,
@@ -371,7 +366,6 @@ function serializeConfig(s){
   var globals = [
     ["// 抢票模式: \"sale_time\" = 按每笔订单的起售时间抢票; \"timer\" = 登录后统一倒计时", "\"mode\": " + q(s.mode)],
     ["// timer 模式下，登录成功后等待的秒数", "\"delay_seconds\": " + Math.max(0, Math.round(Number(s.delay_seconds) || 0))],
-    ["// 调试用: true = 点预订后暂停，人工查看选座界面；平时保持 false", "\"debug_seat\": " + !!s.debug_seat],
     ["// 全局默认: 是否勾选静音车厢（车次不支持时自动跳过）；每笔订单可单独覆盖", "\"mute_car\": " + !!s.mute_car],
     ["// 全局默认: 首选座位字母 A/B/C/D/F（二等座无 E 座），\"\" = 不选座；每笔订单可单独覆盖", "\"preferred_seat\": " + q(s.preferred_seat || "")],
     ["// true = 自动确认提交订单（付款仍由人工完成）；false（默认）= 停在确认框前人工确认", "\"auto_submit\": " + !!s.auto_submit],
@@ -526,7 +520,6 @@ function renderGlobals(){
   $("#g-mute").checked = !!state.mute_car;
   $("#g-auto").checked = !!state.auto_submit;
   $("#g-test").checked = !!state.test_mode;
-  $("#g-debug").checked = !!state.debug_seat;
 }
 
 function orderTitle(o, i){
@@ -731,7 +724,6 @@ document.addEventListener("input", function(e){
   if (t.id === "g-mute"){ state.mute_car = t.checked; return; }
   if (t.id === "g-auto"){ state.auto_submit = t.checked; refreshMsg(); return; }
   if (t.id === "g-test"){ state.test_mode = t.checked; refreshMsg(); return; }
-  if (t.id === "g-debug"){ state.debug_seat = t.checked; return; }
 
   var o = getOrderCard(t);
   if (!o) return;

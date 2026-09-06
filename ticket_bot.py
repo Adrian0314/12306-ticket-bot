@@ -145,7 +145,6 @@ class TicketBot:
         self.orders = config.get("orders", [])
         self.mode = config.get("mode", "sale_time")
         self.delay_seconds = config.get("delay_seconds", 5)
-        self.debug_seat = config.get("debug_seat", False)
         self.mute_car = config.get("mute_car", False)           # 勾选静音车厢（车次支持时）
         self.preferred_seat = config.get("preferred_seat", "")  # 首选座位字母 A/B/C/D/F，空=不选座
         self.auto_submit = config.get("auto_submit", False)     # False=停在确认页人工提交
@@ -466,11 +465,6 @@ class TicketBot:
                     return False
 
         time.sleep(2)
-
-        # 调试模式：点预订后暂停，人工查看选座 UI
-        if self.debug_seat:
-            log("  调试模式：已暂停，请查看选座界面。按 Enter 继续...")
-            input()
 
         # 选乘客
         for i, p in enumerate(passengers):

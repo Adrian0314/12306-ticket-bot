@@ -53,7 +53,6 @@ python ticket_bot.py
 |------|------|
 | `mode` | `"sale_time"` = 每笔订单按起售时间抢；`"timer"` = 登录后统一倒计时 |
 | `delay_seconds` | `timer` 模式下登录后等待的秒数 |
-| `debug_seat` | `true` = 点预订后暂停，人工查看选座界面 |
 | `mute_car` | 全局默认：`true` = 勾选静音车厢；**每笔订单可单独覆盖**（订单内加同名字段） |
 | `preferred_seat` | 全局默认：首选座位字母 `A/B/C/D/F`（二等座无 E），留空 `""` = 不选座；**每笔订单可单独覆盖** |
 | `auto_submit` | `false`（默认）= 停在确认框前人工确认；`true` = 自动确认提交 |
