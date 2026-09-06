@@ -10,3 +10,9 @@ ticket_log_v4.txt
 # Python
 __pycache__/
 *.pyc
+
+# ===== 个人信息保护（本地添加）=====
+# config.json 修改为真实行程后严禁提交/上传
+config.json
+# 本地配置编辑器也不入库
+config_editor.html
