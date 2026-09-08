@@ -809,11 +809,16 @@ class TicketBot:
         if wait_seconds <= SALE_LEAD_TIME:
             return
         log(f"  距起售 {sale_time} 还有 {int(wait_seconds // 60)} 分 {int(wait_seconds % 60)} 秒")
+        last_progress = time.time()
         while True:
             now = datetime.now()
             remaining = (target - now).total_seconds()
             if remaining <= SALE_LEAD_TIME:
                 break
+            # 每分钟报一次剩余时间，避免长时间等待看起来像卡死
+            if time.time() - last_progress >= 60:
+                log(f"  距起售还有 {int(remaining // 60)} 分 {int(remaining % 60)} 秒")
+                last_progress = time.time()
             time.sleep(min(remaining - SALE_LEAD_TIME, 30))
         log(f"  起售时刻临近，开始查询 {sale_time}")
 
@@ -867,8 +872,9 @@ class TicketBot:
                     f"{order['from_st']} → {order['to_st']}  {order['date']} "
                     f"({len(order['passengers'])}人) ---")
 
+                # 与 config 注释一致：订单的 sale_time 仅在 sale_time 模式下生效
                 sale_time = order.get("sale_time")
-                if sale_time:
+                if sale_time and self.mode == "sale_time":
                     self.wait_until_sale_time(sale_time)
 
                 try:
