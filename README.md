@@ -66,6 +66,15 @@ python ticket_bot.py
 | `seat_type` | 席别：二等座 / 一等座 / 商务座 / 硬座 / 无座 |
 | `passengers` | 乘车人列表，`name` 必须与 12306 常用联系人一致 |
 
+## 可视化配置编辑器
+
+不想手改 JSON 的话，直接双击打开 `config_editor.html`（纯本地静态页面，不发起任何网络请求）：
+
+- 表单式编辑全局设置与每笔订单，自动生成带 `//` 注释的 `config.json`，点「保存」直接写回原文件
+- **批量修改乘车人**：一键在所有订单里替换 / 添加 / 移除乘客，先预览影响几笔订单再执行；替换时新姓名留空等于删除该乘客，可只处理启用中的订单、可自动去重
+- 自动记住上次打开的文件：下次打开直接继续编辑，不用重新选文件（浏览器里只存文件引用，不缓存姓名/行程等内容，可用「忘记它」清除）
+- 也支持把 `config.json` 拖进页面导入
+
 ## 原理
 
 1. Selenium 启动真实 Chrome，扫码登录 12306
@@ -76,7 +85,9 @@ python ticket_bot.py
 ## 目录结构
 
 - `ticket_bot.py` — 主脚本
+- `config_editor.html` — 可视化配置编辑器（双击即用，纯本地运行）
 - `config.json` — 订单配置（脱敏示例，随仓库分发；请改成你自己的行程）
+- `test_ticket_bot.py` — 单元测试（`python -m unittest -v`，选座回归需要 `pip install lxml`）
 - `ticket_log_v4.txt` — 本地运行日志（自动生成，含行程信息，已在 `.gitignore`）
 
 ## License

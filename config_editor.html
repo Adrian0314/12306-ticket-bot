@@ -105,9 +105,9 @@ input[type=radio]{accent-color:var(--acc)}
 
 footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-height:1.8}
 
-#modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;
+#modal,#batchModal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;
   align-items:center;justify-content:center;padding:20px;z-index:50}
-#modal[hidden]{display:none}
+#modal[hidden],#batchModal[hidden]{display:none}
 .modal-card{background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:85vh;
   display:flex;flex-direction:column;overflow:hidden}
 .modal-card header{display:flex;align-items:center;justify-content:space-between;
@@ -116,6 +116,24 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
 .modal-card pre{margin:0;padding:16px;overflow:auto;background:#f8fafc;
   font-family:Consolas,"Courier New",monospace;font-size:12px;line-height:1.55;flex:1}
 .modal-foot{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+
+.modal-body{flex:1;overflow:auto;padding:16px}
+.batch-block{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+.batch-block>label.blk-title{display:block;font-size:12px;color:var(--muted);margin-bottom:8px}
+.op-list{display:flex;flex-direction:column;gap:8px}
+.op-list label{display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px}
+.op-list label input{margin-top:3px;accent-color:var(--acc)}
+.op-list label span small{display:block;color:var(--muted);font-size:11px;line-height:1.45}
+.batch-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end}
+.batch-grid.two{grid-template-columns:1fr 1fr}
+.batch-grid .arrow{color:var(--muted);padding-bottom:9px;text-align:center}
+.pax-preview{background:var(--acc-soft);border:1px solid #bfdbfe;border-radius:8px;
+  padding:10px 12px;font-size:13px;color:#1e3a8a;line-height:1.6}
+.pax-preview b{font-size:15px}
+.pax-preview .muted{color:#3b5f9e;font-size:12px}
+.pax-preview.warn{background:var(--warn-soft);border-color:#fde68a;color:var(--warn)}
+.pax-preview.warn .muted{color:var(--warn)}
+.sample-names{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
 
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);
   background:#111827;color:#fff;border-radius:10px;padding:9px 18px;font-size:13px;
@@ -218,7 +236,10 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
 
     <div class="sec-head">
       <h2 class="sec-title">订单</h2>
-      <button class="btn sm" id="btnAddOrder">✚ 添加订单</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn sm" id="btnBatchPax">👥 批量改乘车人</button>
+        <button class="btn sm" id="btnAddOrder">✚ 添加订单</button>
+      </div>
     </div>
     <div id="orders"></div>
   </section>
@@ -240,6 +261,64 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
     <div class="modal-foot">
       <button class="btn sm" id="btnCopy">复制内容</button>
       <button class="btn sm primary" id="btnSaveFromModal">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="batchModal" hidden>
+  <div class="modal-card" style="max-width:620px">
+    <header>
+      <h3>批量修改乘车人</h3>
+      <button class="btn sm" id="btnCloseBatch">✕ 关闭</button>
+    </header>
+    <div class="modal-body">
+      <div class="batch-block">
+        <label class="blk-title">选择操作</label>
+        <div class="op-list">
+          <label><input type="radio" name="batchOp" value="replace" checked>
+            <span><b>替换乘车人</b><small>把所有订单里的「原姓名」换成「新姓名」；新姓名留空则等于删除该乘客</small></span></label>
+          <label><input type="radio" name="batchOp" value="add">
+            <span><b>批量添加乘车人</b><small>给每一笔订单都加上这个乘车人（已存在会自动去重）</small></span></label>
+          <label><input type="radio" name="batchOp" value="remove">
+            <span><b>批量移除乘车人</b><small>从所有订单里删掉指定姓名的乘车人</small></span></label>
+        </div>
+      </div>
+
+      <div class="batch-block">
+        <label class="blk-title">填写姓名</label>
+        <div class="batch-grid" id="rowReplace">
+          <div class="field">
+            <label>原姓名（须与 12306 完全一致）</label>
+            <input type="text" id="batchFrom" placeholder="要改掉的姓名">
+          </div>
+          <div class="arrow">→</div>
+          <div class="field">
+            <label>新姓名（留空 = 删除此人）</label>
+            <input type="text" id="batchTo" placeholder="新姓名">
+          </div>
+        </div>
+        <div id="rowSingle" hidden>
+          <div class="field">
+            <label id="singleLabel">姓名</label>
+            <input type="text" id="batchName" placeholder="乘车人姓名">
+          </div>
+        </div>
+        <div class="sample-names" id="batchNameHint"></div>
+      </div>
+
+      <div class="batch-block">
+        <label class="blk-title">作用范围与选项</label>
+        <label class="switch" style="margin-bottom:10px"><input type="checkbox" id="batchOnlyEnabled">
+          <span class="sw-text"><b>只处理启用中的订单</b><span>关闭后连 enabled=false 的订单一起改</span></span></label>
+        <label class="switch"><input type="checkbox" id="batchDedupe" checked>
+          <span class="sw-text"><b>同笔订单内自动去重</b><span>避免替换后出现重复乘客（推荐开启）</span></span></label>
+      </div>
+
+      <div class="pax-preview" id="batchPreview"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn sm" id="btnBatchCancel">取消</button>
+      <button class="btn sm primary" id="btnBatchRun">执行</button>
     </div>
   </div>
 </div>
@@ -478,6 +557,72 @@ function validateState(s){
     ? "测试模式开启时不会真正提交订单（auto_submit 不生效）"
     : "当前为测试模式：流程会停在确认订单页，不会真正下单");
   return { errors: errors, warnings: warnings };
+}
+
+// 批量修改乘车人（纯函数，不修改传入的 state）
+// opts = { op: "replace"|"add"|"remove", from, to, onlyEnabled, dedupe }
+//   replace：把所有订单里的 from 换成 to；to 留空 = 删除该乘车人
+//   add    ：给每笔订单加上 to
+//   remove ：从所有订单里删掉 from
+// 返回 { state, changedOrders, changedPax, removedDuplicate }
+//   changedOrders    乘车人名单发生变化的订单数
+//   changedPax       被替换 / 新增 / 删除的乘车人条目数（不含去重删掉的）
+//   removedDuplicate 同笔订单内被去重掉的重复条目数
+function batchEditPassengers(s, opts){
+  opts = opts || {};
+  var op = opts.op || "replace";
+  var from = String(opts.from == null ? "" : opts.from).trim();
+  var to = String(opts.to == null ? "" : opts.to).trim();
+  var onlyEnabled = !!opts.onlyEnabled;
+  var dedupe = opts.dedupe !== false;
+
+  var out = JSON.parse(JSON.stringify(s));
+  var changedOrders = 0, changedPax = 0, removedDuplicate = 0;
+
+  (out.orders || []).forEach(function(o){
+    if (onlyEnabled && !o.enabled) return;
+    if (!Array.isArray(o.passengers)) o.passengers = [""];
+    var before = o.passengers.slice();
+    var next = [];
+
+    o.passengers.forEach(function(raw){
+      var name = String(raw == null ? "" : raw).trim();
+      if (op === "add"){
+        next.push(name);
+      } else if (op === "remove"){
+        if (name && name === from){ changedPax++; }   // 不 push = 删除
+        else next.push(name);
+      } else {                                        // replace
+        if (name && name === from){
+          changedPax++;
+          if (to) next.push(to);                      // to 为空则不 push = 删除
+        } else next.push(name);
+      }
+    });
+
+    if (op === "add" && to){ next.push(to); changedPax++; }
+
+    if (dedupe){
+      var seen = {}, uniq = [];
+      next.forEach(function(n){
+        if (!n){ uniq.push(n); return; }              // 空行保留，交给用户自己补
+        if (seen[n]){ removedDuplicate++; return; }
+        seen[n] = 1; uniq.push(n);
+      });
+      next = uniq;
+    }
+
+    if (next.length === 0) next = [""];
+    o.passengers = next;
+    if (before.join("\u0000") !== next.join("\u0000")) changedOrders++;
+  });
+
+  return {
+    state: out,
+    changedOrders: changedOrders,
+    changedPax: changedPax,
+    removedDuplicate: removedDuplicate
+  };
 }
 /*PURE-END*/
 
@@ -1091,6 +1236,118 @@ document.addEventListener("drop", function(e){
   });
 });
 
+/* ---------- 批量修改乘车人 ---------- */
+function readBatchOpts(){
+  var op = "replace";
+  document.querySelectorAll("input[name=batchOp]").forEach(function(r){
+    if (r.checked) op = r.value;
+  });
+  return {
+    op: op,
+    from: $("#batchFrom").value,
+    to: $("#batchTo").value,
+    name: $("#batchName").value,
+    onlyEnabled: $("#batchOnlyEnabled").checked,
+    dedupe: $("#batchDedupe").checked
+  };
+}
+
+// 把表单取值整理成纯函数 batchEditPassengers 需要的 opts
+function toPureOpts(raw){
+  if (raw.op === "add")    return { op: "add",    to: raw.name,   onlyEnabled: raw.onlyEnabled, dedupe: raw.dedupe };
+  if (raw.op === "remove") return { op: "remove", from: raw.name, onlyEnabled: raw.onlyEnabled, dedupe: raw.dedupe };
+  return { op: "replace", from: raw.from, to: raw.to, onlyEnabled: raw.onlyEnabled, dedupe: raw.dedupe };
+}
+
+// 全部订单里出现过的乘车人（去重、保序），供用户参考 / 点击填入
+function currentNames(){
+  if (!state) return [];
+  var seen = {}, out = [];
+  state.orders.forEach(function(o){
+    (o.passengers || []).forEach(function(n){
+      var k = String(n == null ? "" : n).trim();
+      if (k && !seen[k]){ seen[k] = 1; out.push(k); }
+    });
+  });
+  return out;
+}
+
+function syncBatchForm(){
+  var raw = readBatchOpts();
+  var isReplace = raw.op === "replace";
+  $("#rowReplace").hidden = !isReplace;
+  $("#rowSingle").hidden = isReplace;
+  $("#singleLabel").textContent = raw.op === "add" ? "要添加的姓名" : "要移除的姓名";
+  $("#batchName").placeholder = raw.op === "add" ? "乘车人姓名" : "要从所有订单里删掉的姓名";
+  var names = currentNames();
+  $("#batchNameHint").textContent = names.length ? "现有乘车人：" + names.join("、") : "";
+  updateBatchPreview();
+}
+
+function updateBatchPreview(){
+  var box = $("#batchPreview");
+  var btn = $("#btnBatchRun");
+  if (!state){ box.className = "pax-preview warn"; box.textContent = "请先载入配置"; return; }
+  var raw = readBatchOpts();
+  var pure = toPureOpts(raw);
+  var ready = raw.op === "add" ? !!String(raw.name).trim() : !!String(pure.from || "").trim();
+  if (!ready){
+    box.className = "pax-preview warn";
+    box.textContent = raw.op === "add" ? "请先填写要添加的乘车人姓名" : "请先填写要处理的乘车人姓名";
+    btn.disabled = true;
+    return;
+  }
+  btn.disabled = false;
+  var r = batchEditPassengers(state, pure);
+  if (!r.changedOrders){
+    box.className = "pax-preview warn";
+    box.textContent = "没有匹配到可修改的内容：姓名须与订单里填写的完全一致";
+    return;
+  }
+  box.className = "pax-preview";
+  box.innerHTML = "将影响 <b>" + r.changedOrders + "</b> 笔订单，共 " + r.changedPax + " 条乘车人记录"
+    + (r.removedDuplicate ? '<div class="muted">其中去重删除 ' + r.removedDuplicate + ' 条重复记录</div>' : "")
+    + (raw.op === "replace" && !String(raw.to).trim()
+        ? '<div class="muted">新姓名留空 = 删除该乘客</div>' : "");
+}
+
+function openBatch(){
+  if (!state){ toast("请先载入配置", "err"); return; }
+  $("#batchFrom").value = "";
+  $("#batchTo").value = "";
+  $("#batchName").value = "";
+  document.querySelectorAll("input[name=batchOp]").forEach(function(r, i){
+    r.checked = (i === 0);
+  });
+  $("#batchOnlyEnabled").checked = false;
+  $("#batchDedupe").checked = true;
+  syncBatchForm();
+  $("#batchModal").hidden = false;
+  var first = $("#batchFrom");
+  if (!first.closest(".batch-grid").hidden) first.focus();
+  else $("#batchName").focus();
+}
+
+function runBatch(){
+  if (!state) return;
+  var raw = readBatchOpts();
+  var pure = toPureOpts(raw);
+  var r = batchEditPassengers(state, pure);
+  if (!r.changedOrders){ toast("没有订单需要修改", "err"); return; }
+  var action = raw.op === "add"
+    ? "添加乘车人「" + String(raw.name).trim() + "」"
+    : raw.op === "remove"
+      ? "移除乘车人「" + String(pure.from).trim() + "」"
+      : "把「" + String(pure.from).trim() + "」替换为「" + (String(raw.to).trim() || "（删除该乘客）") + "」";
+  if (!confirm("确认" + action + "？\n\n将影响 " + r.changedOrders + " 笔订单、共 " + r.changedPax
+               + " 条乘车人记录。\n（只是改编辑器内容，点「保存」前不会写入 config.json）")) return;
+  state = r.state;
+  $("#batchModal").hidden = true;
+  renderAll();
+  refreshMsg();
+  toast("已批量修改 " + r.changedOrders + " 笔订单，记得点「保存」", "ok");
+}
+
 /* ---------- 绑定 ---------- */
 $("#btnOpen").addEventListener("click", doOpen);
 $("#btnOpen2").addEventListener("click", doOpen);
@@ -1113,6 +1370,31 @@ $("#btnCloseModal").addEventListener("click", function(){ $("#modal").hidden = t
 $("#modal").addEventListener("click", function(e){
   if (e.target === this) this.hidden = true;
 });
+
+/* ---------- 批量修改乘车人：绑定 ---------- */
+$("#btnBatchPax").addEventListener("click", openBatch);
+$("#btnCloseBatch").addEventListener("click", function(){ $("#batchModal").hidden = true; });
+$("#btnBatchCancel").addEventListener("click", function(){ $("#batchModal").hidden = true; });
+$("#btnBatchRun").addEventListener("click", runBatch);
+$("#batchModal").addEventListener("click", function(e){
+  if (e.target === this) this.hidden = true;
+});
+document.querySelectorAll("input[name=batchOp]").forEach(function(r){
+  r.addEventListener("change", syncBatchForm);
+});
+["#batchFrom", "#batchTo", "#batchName"].forEach(function(sel){
+  $(sel).addEventListener("input", updateBatchPreview);
+});
+$("#batchOnlyEnabled").addEventListener("change", updateBatchPreview);
+$("#batchDedupe").addEventListener("change", updateBatchPreview);
+$("#batchNameHint").addEventListener("click", function(e){
+  var name = (e.target.textContent || "").trim();
+  if (!name) return;
+  var raw = readBatchOpts();
+  if (raw.op === "replace"){ if (!$("#batchFrom").value.trim()) $("#batchFrom").value = name; }
+  else $("#batchName").value = name;
+  updateBatchPreview();
+});
 $("#btnCopy").addEventListener("click", function(){
   var text = $("#previewText").textContent;
   var btn = this;
@@ -1131,7 +1413,7 @@ $("#btnCopy").addEventListener("click", function(){
   } else fallback();
 });
 document.addEventListener("keydown", function(e){
-  if (e.key === "Escape") $("#modal").hidden = true;
+  if (e.key === "Escape"){ $("#modal").hidden = true; $("#batchModal").hidden = true; }
 });
 
 /* ---------- 启动：尝试恢复上次打开的文件 ---------- */
