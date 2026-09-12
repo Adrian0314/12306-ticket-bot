@@ -154,8 +154,20 @@ class TicketBot:
 
     # ============ 选择器（用户 F12 定位，已按真实元素写死） ============
     MUTE_CAR_XPATH = "//input[@id='seat-jy']"
-    # 二等座座位图在 erdeng1 容器内（一等/特等/商务容器都是隐藏的，且 id 重复，必须限定容器）
-    SEAT_CHOICE_XPATH = "//div[@id='erdeng1']//a[text()='{letter}']"
+    # 座位图按席别分容器：#erdeng1/#erdeng2…（二等座）、#yideng*（一等座）、#tedeng*（特等座）、
+    # #shangwu*（商务座）。页面上各席别容器同时存在（非当前席别的被 display:none 隐藏），
+    # 且容器内 a 的 id 会重复（如 #1A 在 erdeng1/yideng1/tedeng1/shangwu1 里都有），
+    # 所以必须「先按席别选前缀，再按可见性选行」，不能直接点 a[text()='A']。
+    SEAT_GROUP_PREFIX = {
+        "二等座": "erdeng",
+        "一等座": "yideng",
+        "特等座": "tedeng",
+        "商务座": "shangwu",
+    }
+    # 座位图的行容器（一行对应一位乘车人），只有可见的行才是当前席别需要点的
+    SEAT_ROW_XPATH = "//div[starts-with(@id,'{prefix}')][.//ul[contains(@class,'seat-list')]]"
+    # 确认框里的「已选座 0/N」，N = 本次需要选几个座位（= 乘车人数）
+    SEAT_NEEDED_XPATH = "//span[@id='selectNo']"
     STUDENT_DIALOG_OK_XPATH = "//a[contains(@id,'xsertcj') and text()='确认']"
     # 勾选静音车厢后弹出的规则说明弹窗的确定按钮
     WARNING_DIALOG_OK_XPATH = "//a[@id='qd_closeDefaultWarningWindowDialog_id']"
@@ -510,7 +522,8 @@ class TicketBot:
         if mute_car:
             self._try_select_mute_car()
         if preferred_seat:
-            self._try_select_seat(preferred_seat)
+            # 座位图一行对应一位乘车人，需要按人数逐行点，否则多人订单选不满
+            self._try_select_seat(preferred_seat, seat_type, len(passengers))
 
         # 这些提示可能异步出现，确认后才能继续操作订单确认页。
         self._click_confirmation_dialogs(timeout=3)
@@ -715,21 +728,76 @@ class TicketBot:
         except Exception:
             pass  # 无弹窗，正常继续
 
-    def _try_select_seat(self, letter):
-        """点击座位图字母按钮（优先分配）。车次不支持选座则跳过。"""
+    def _read_seat_counter(self):
+        """读确认框里的「已选座 x/N」，返回 (已选数, 需要数)；读不到返回 (0, 0)。"""
         try:
-            btn = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, self.SEAT_CHOICE_XPATH.format(letter=letter))
-                )
-            )
-            try:
-                btn.click()
-            except Exception:
-                self.driver.execute_script("arguments[0].click();", btn)
-            log(f"  已选择优先分配座位: {letter}")
+            txt = self.driver.find_element(By.XPATH, self.SEAT_NEEDED_XPATH).text or ""
         except Exception:
-            log(f"  本车次无选座功能或未找到 {letter} 座按钮，跳过")
+            return 0, 0
+        m = re.search(r"(\d+)\s*/\s*(\d+)", txt)
+        if not m:
+            return 0, 0
+        return int(m.group(1)), int(m.group(2))
+
+    def _read_seat_need(self, default=1):
+        """本次需要选几个座位（N = 乘车人数）。"""
+        _, need = self._read_seat_counter()
+        return need if need > 0 else default
+
+    def _try_select_seat(self, letters, seat_type="", passenger_count=1):
+        """按乘车人逐行点击座位图字母按钮（优先分配座位）。
+
+        确认框里的座位图是「一行对应一位乘车人」：#erdeng1 是第 1 人、#erdeng2 是第 2 人……
+        只点第一行会导致「已选座 0/N」永远填不满，第二位乘车人选不上座，因此这里逐行都点。
+        letters 支持单个字母（所有人都用同一偏好，如 "A"）或多个字母（按行依次分配，
+        如 "AB" / "DF"，用于两人想坐一起）；不足时循环取用。
+        席别/车次不支持选座时跳过，不报错。
+        """
+        letters = [c for c in str(letters).upper() if c in "ABCDF"]
+        if not letters:
+            return
+        prefix = self.SEAT_GROUP_PREFIX.get(seat_type, "erdeng")
+        need = self._read_seat_need(default=passenger_count or 1)
+
+        # 只挑当前席别下真正可见的座位行
+        try:
+            rows = self.driver.find_elements(By.XPATH, self.SEAT_ROW_XPATH.format(prefix=prefix))
+            rows = [r for r in rows if r.is_displayed()]
+        except Exception:
+            rows = []
+
+        if not rows:
+            log(f"  本车次无选座功能或未找到 {seat_type or '二等座'} 座位图，跳过")
+            return
+
+        target = min(need, len(rows))
+        if target < need:
+            log(f"  座位图只暴露 {len(rows)} 行，少于 {need} 位乘车人，尽力选满")
+
+        clicked = 0
+        for i in range(target):
+            letter = letters[i % len(letters)]
+            try:
+                btn = rows[i].find_element(By.XPATH, f".//a[text()='{letter}']")
+                if not btn.is_displayed():
+                    log(f"  第 {i + 1} 行没有 {letter} 座，跳过")
+                    continue
+                try:
+                    btn.click()
+                except Exception:
+                    self.driver.execute_script("arguments[0].click();", btn)
+                clicked += 1
+                log(f"  已为第 {i + 1} 位乘客选择座位偏好: {letter}")
+            except Exception:
+                log(f"  第 {i + 1} 行未找到 {letter} 座按钮，跳过")
+
+        if clicked:
+            done, total = self._read_seat_counter()
+            total = total or need
+            detail = f"（页面显示已选座 {done}/{total}）" if total else ""
+            log(f"  座位偏好已为 {clicked} 位乘车人选中{detail}")
+            if total and done < total:
+                log(f"  提示：已选座 {done}/{total} 未填满，可人工在确认框里补选")
 
     def _wait_order_result(self, timeout=60):
         """
