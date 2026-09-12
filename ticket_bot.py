@@ -452,6 +452,8 @@ class TicketBot:
         # 静音车厢/选座支持订单级独立配置，订单没写则用全局默认
         mute_car = order.get("mute_car", self.mute_car)
         preferred_seat = order.get("preferred_seat", self.preferred_seat)
+        # 多笔同线路订单合并后，按乘车人顺序保留的逐人座位偏好（元素可为 "" = 该人不选座）
+        preferred_seats = order.get("preferred_seats") or []
 
         # 点预订按钮
         if "book_btn" in train_info:
@@ -521,7 +523,10 @@ class TicketBot:
         # 确认框内：勾静音车厢 + 选座（车次支持时，找不到就跳过）
         if mute_car:
             self._try_select_mute_car()
-        if preferred_seat:
+        if preferred_seats:
+            # 座位图一行对应一位乘车人：按合并前各笔订单的偏好逐人点击（谁选的归谁）
+            self._try_select_seat(preferred_seats, seat_type, len(passengers))
+        elif preferred_seat:
             # 座位图一行对应一位乘车人，需要按人数逐行点，否则多人订单选不满
             self._try_select_seat(preferred_seat, seat_type, len(passengers))
 
@@ -749,13 +754,28 @@ class TicketBot:
 
         确认框里的座位图是「一行对应一位乘车人」：#erdeng1 是第 1 人、#erdeng2 是第 2 人……
         只点第一行会导致「已选座 0/N」永远填不满，第二位乘车人选不上座，因此这里逐行都点。
-        letters 支持单个字母（所有人都用同一偏好，如 "A"）或多个字母（按行依次分配，
-        如 "AB" / "DF"，用于两人想坐一起）；不足时循环取用。
+
+        letters 支持三种写法：
+          "A"            所有乘车人都选 A
+          "DF"           按行依次分配：第 1 人 D、第 2 人 F（不够时循环取用）
+          ["D", "F", ""] 逐人指定；空字符串表示该位乘客不选座（多笔订单合并后逐人生效）
+
         席别/车次不支持选座时跳过，不报错。
         """
-        letters = [c for c in str(letters).upper() if c in "ABCDF"]
-        if not letters:
+        per_passenger = isinstance(letters, (list, tuple))
+        if per_passenger:
+            plan = []
+            for item in letters:
+                ch = str(item).strip().upper()
+                plan.append(ch if len(ch) == 1 and ch in "ABCDF" else "")
+        else:
+            plan = [c for c in str(letters).upper() if c in "ABCDF"]
+
+        if not plan or not any(plan):
+            if per_passenger and plan:
+                log("  所有乘车人都配置为不选座，跳过选座")
             return
+
         prefix = self.SEAT_GROUP_PREFIX.get(seat_type, "erdeng")
         need = self._read_seat_need(default=passenger_count or 1)
 
@@ -776,7 +796,13 @@ class TicketBot:
 
         clicked = 0
         for i in range(target):
-            letter = letters[i % len(letters)]
+            if per_passenger:
+                letter = plan[i] if i < len(plan) else ""
+                if not letter:
+                    log(f"  第 {i + 1} 位乘客未配置座位偏好，跳过")
+                    continue
+            else:
+                letter = plan[i % len(plan)]
             try:
                 btn = rows[i].find_element(By.XPATH, f".//a[text()='{letter}']")
                 if not btn.is_displayed():
@@ -890,38 +916,53 @@ class TicketBot:
             time.sleep(min(remaining - SALE_LEAD_TIME, 30))
         log(f"  起售时刻临近，开始查询 {sale_time}")
 
+    def _merge_orders(self):
+        """同线路（出发/到达/日期/时段相同）订单合并为一笔，乘车人按配置顺序累加。
+
+        座位偏好按「乘车人顺序」逐人保留到 preferred_seats：每笔原始订单的 preferred_seat
+        只应用到它自己的乘客身上。这样订单 2 选 D、订单 3 选 F 时，合并后第 1 人 D、
+        第 2 人 F，不会出现后一笔覆盖前一笔的情况（空字符串 = 该乘客不选座）。
+        """
+        merged = {}
+        for o in self.orders:
+            if not o.get("enabled", True):
+                continue
+            pax = o.get("passengers") or []
+            key = (o["from_st"], o["to_st"], o["date"], o.get("depart_time_range", ""))
+            if key not in merged:
+                merged[key] = {
+                    "from_st": o["from_st"],
+                    "to_st": o["to_st"],
+                    "date": o["date"],
+                    "sale_time": o.get("sale_time"),
+                    "depart_time_range": o.get("depart_time_range", ""),
+                    "seat_type": o.get("seat_type", ""),
+                    "mute_car": o.get("mute_car", self.mute_car),
+                    "preferred_seat": o.get("preferred_seat", self.preferred_seat),
+                    "preferred_seats": [],
+                    "passengers": [],
+                }
+            merged[key]["passengers"].extend(pax)
+            # 该笔订单自己的座位偏好，逐个应用到它自己的乘客
+            seat_pref = o.get("preferred_seat", self.preferred_seat) or ""
+            merged[key]["preferred_seats"].extend([seat_pref] * len(pax))
+            if not merged[key]["depart_time_range"] and o.get("depart_time_range"):
+                merged[key]["depart_time_range"] = o["depart_time_range"]
+            if not merged[key]["seat_type"] and o.get("seat_type"):
+                merged[key]["seat_type"] = o["seat_type"]
+            if not merged[key]["mute_car"] and o.get("mute_car", self.mute_car):
+                merged[key]["mute_car"] = o["mute_car"]
+            if not merged[key]["preferred_seat"] and o.get("preferred_seat", self.preferred_seat):
+                merged[key]["preferred_seat"] = o["preferred_seat"]
+
+        merged_orders = list(merged.values())
+        merged_orders.sort(key=lambda o: o.get("sale_time", "99:99"))
+        return merged_orders
+
     def run(self):
         try:
             # 合并同线路
-            merged = {}
-            for o in self.orders:
-                if not o.get("enabled", True):
-                    continue
-                key = (o["from_st"], o["to_st"], o["date"], o.get("depart_time_range", ""))
-                if key not in merged:
-                    merged[key] = {
-                        "from_st": o["from_st"],
-                        "to_st": o["to_st"],
-                        "date": o["date"],
-                        "sale_time": o.get("sale_time"),
-                        "depart_time_range": o.get("depart_time_range", ""),
-                        "seat_type": o.get("seat_type", ""),
-                        "mute_car": o.get("mute_car", self.mute_car),
-                        "preferred_seat": o.get("preferred_seat", self.preferred_seat),
-                        "passengers": [],
-                    }
-                merged[key]["passengers"].extend(o["passengers"])
-                if not merged[key]["depart_time_range"] and o.get("depart_time_range"):
-                    merged[key]["depart_time_range"] = o["depart_time_range"]
-                if not merged[key]["seat_type"] and o.get("seat_type"):
-                    merged[key]["seat_type"] = o["seat_type"]
-                if not merged[key]["mute_car"] and o.get("mute_car", self.mute_car):
-                    merged[key]["mute_car"] = o["mute_car"]
-                if not merged[key]["preferred_seat"] and o.get("preferred_seat", self.preferred_seat):
-                    merged[key]["preferred_seat"] = o["preferred_seat"]
-
-            merged_orders = list(merged.values())
-            merged_orders.sort(key=lambda o: o.get("sale_time", "99:99"))
+            merged_orders = self._merge_orders()
             log(f"合并后共 {len(merged_orders)} 笔订单")
 
             self.login()

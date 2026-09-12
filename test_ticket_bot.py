@@ -218,6 +218,114 @@ class SeatSelectionTests(unittest.TestCase):
         self.assertEqual(self.bot._read_seat_counter(), (0, 0))
         self.assertEqual(self.bot._read_seat_need(default=3), 3)
 
+    def test_per_passenger_list_assigns_each_row(self):
+        """合并订单后的逐人偏好 ["D","F"] → 第 1 人 D、第 2 人 F"""
+        driver = self._select(build_seat_dialog(need=2), ["D", "F"], "二等座", 2)
+        self.assertEqual(driver.clicks, [("erdeng1", "D"), ("erdeng2", "F")])
+        self.assertEqual(driver.counter(), "2/2")
+
+    def test_per_passenger_list_skips_empty_entries(self):
+        """列表里的空字符串表示该位乘客不选座，只点有配置的行"""
+        driver = self._select(build_seat_dialog(need=2), ["D", ""], "二等座", 2)
+        self.assertEqual(driver.clicks, [("erdeng1", "D")])
+        self.assertEqual(driver.counter(), "1/2")
+
+    def test_per_passenger_all_empty_is_noop(self):
+        driver = self._select(build_seat_dialog(need=2), ["", ""], "二等座", 2)
+        self.assertEqual(driver.clicks, [])
+
+    def test_per_passenger_list_shorter_than_rows(self):
+        driver = self._select(build_seat_dialog(need=3, rows=3), ["D", "F"], "二等座", 3)
+        self.assertEqual(driver.clicks, [("erdeng1", "D"), ("erdeng2", "F")])
+
+    def test_per_passenger_invalid_entries_are_ignored(self):
+        driver = self._select(build_seat_dialog(need=2), ["E", "F"], "二等座", 2)
+        self.assertEqual(driver.clicks, [("erdeng2", "F")])
+
+
+class OrderMergeTests(unittest.TestCase):
+    """同线路订单合并：座位偏好必须按乘车人顺序逐人保留（回归）。
+
+    历史 bug：合并时 preferred_seat 只保留第一笔订单的值（后面被 if not ... 挡掉），
+    订单 2 选 D、订单 3 选 F 会被并成一笔两人订单，选座时两人都被点成 D。
+    """
+
+    def setUp(self):
+        self._real_log = ticket_bot.log
+        ticket_bot.log = lambda msg: None  # 测试不写运行日志
+        self.bot = ticket_bot.TicketBot({"preferred_seat": "", "orders": []})
+
+    def tearDown(self):
+        ticket_bot.log = self._real_log
+
+    @staticmethod
+    def _order(name, seat="__omit__", pax=1, enabled=True, sale_time="08:00"):
+        """seat="__omit__" 表示配置里不写这个字段（跟随全局）"""
+        order = {
+            "enabled": enabled, "from_st": "佛山西", "to_st": "平南南",
+            "date": "2026-09-26", "sale_time": sale_time, "depart_time_range": "",
+            "seat_type": "二等座",
+            "passengers": [{"name": name} for _ in range(pax)],
+        }
+        if seat != "__omit__":
+            order["preferred_seat"] = seat
+        return order
+
+    def test_each_order_keeps_its_own_seat_preference(self):
+        self.bot.orders = [self._order("乘客A", seat="D"),
+                           self._order("乘客B", seat="F", sale_time="08:01")]
+        merged = self.bot._merge_orders()
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(len(merged[0]["passengers"]), 2)
+        self.assertEqual(merged[0]["preferred_seats"], ["D", "F"])
+
+    def test_omitted_seat_falls_back_to_global(self):
+        self.bot = ticket_bot.TicketBot({"preferred_seat": "D", "orders": []})
+        self.bot.orders = [self._order("乘客A"),
+                           self._order("乘客B", seat="F", sale_time="08:01")]
+        merged = self.bot._merge_orders()
+        self.assertEqual(merged[0]["preferred_seats"], ["D", "F"])
+
+    def test_explicit_empty_seat_is_preserved(self):
+        '''配置里写 ""（不选座）不会被其他订单的字母覆盖'''
+        self.bot.orders = [self._order("乘客A", seat=""),
+                           self._order("乘客B", seat="F", sale_time="08:01")]
+        merged = self.bot._merge_orders()
+        self.assertEqual(merged[0]["preferred_seats"], ["", "F"])
+
+    def test_multi_passenger_order_expands_its_preference(self):
+        self.bot.orders = [self._order("乘客A", seat="D", pax=2),
+                           self._order("乘客B", seat="F", sale_time="08:01")]
+        merged = self.bot._merge_orders()
+        self.assertEqual(merged[0]["preferred_seats"], ["D", "D", "F"])
+        self.assertEqual(len(merged[0]["passengers"]), 3)
+
+    def test_disabled_orders_are_not_merged(self):
+        self.bot.orders = [self._order("乘客A", seat="D", enabled=False),
+                           self._order("乘客B", seat="F")]
+        merged = self.bot._merge_orders()
+        self.assertEqual([p["name"] for p in merged[0]["passengers"]], ["乘客B"])
+        self.assertEqual(merged[0]["preferred_seats"], ["F"])
+
+    def test_different_routes_are_not_merged(self):
+        self.bot.orders = [self._order("乘客A", seat="D"),
+                           self._order("乘客B", seat="F", sale_time="08:01")]
+        self.bot.orders[1]["to_st"] = "广州南"
+        merged = self.bot._merge_orders()
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0]["preferred_seats"], ["D"])
+        self.assertEqual(merged[1]["preferred_seats"], ["F"])
+
+    def test_merged_order_keeps_other_fields(self):
+        self.bot.orders = [self._order("乘客A", seat="D", sale_time="07:00"),
+                           self._order("乘客B", seat="F", sale_time="08:01")]
+        merged = self.bot._merge_orders()
+        self.assertEqual(merged[0]["from_st"], "佛山西")
+        self.assertEqual(merged[0]["to_st"], "平南南")
+        self.assertEqual(merged[0]["date"], "2026-09-26")
+        self.assertEqual(merged[0]["sale_time"], "07:00")
+        self.assertEqual(merged[0]["seat_type"], "二等座")
+
 
 if lxml_html is None:
     SeatSelectionTests = unittest.skip(
