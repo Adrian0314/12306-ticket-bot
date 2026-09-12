@@ -39,6 +39,16 @@ main{padding:18px 0 48px}
 .btn.danger:hover{background:var(--danger-soft);border-color:#fecaca}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 
+.filechip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);
+  background:#f3f4f6;border:1px solid var(--line);border-radius:999px;padding:4px 11px;max-width:100%}
+.filechip b{color:var(--text);font-weight:600}
+.filechip.warn{background:var(--warn-soft);border-color:#fde68a;color:var(--warn)}
+.filechip.ok{background:#f0fdf4;border-color:#bbf7d0;color:var(--ok)}
+
+.resume{width:100%;display:flex;flex-direction:column;align-items:center;gap:8px}
+.resume .divider{width:min(420px,80%);border:none;border-top:1px solid var(--line);margin:14px 0 2px}
+.resume .last-name{font-weight:600;color:var(--text)}
+
 .sec-title{font-size:14px;font-weight:600;margin:20px 0 8px;color:var(--text)}
 .sec-head{display:flex;align-items:center;justify-content:space-between;margin:20px 0 8px}
 .sec-head .sec-title{margin:0}
@@ -133,6 +143,7 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
   <div class="toolbar card" id="toolbar" hidden>
     <button class="btn primary" id="btnOpen">📂 打开 config.json</button>
     <button class="btn" id="btnNew">✚ 新建空白配置</button>
+    <span class="filechip" id="fileName" hidden></span>
     <div class="spacer"></div>
     <button class="btn" id="btnPreview">👁 预览 JSON</button>
     <button class="btn primary" id="btnSave">💾 保存</button>
@@ -141,6 +152,17 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
   </div>
 
   <section id="empty" class="card empty">
+    <div class="resume" id="resumeBox" hidden>
+      <div class="big">📄 继续上次编辑</div>
+      <p>上次打开的是 <span class="last-name" id="resumeName">config.json</span></p>
+      <div class="btns">
+        <button class="btn primary" id="btnResume">↻ 打开上次的文件</button>
+        <button class="btn" id="btnForget">忘记它</button>
+      </div>
+      <p style="margin-top:6px">首次恢复需要浏览器授权一次文件读写</p>
+      <hr class="divider">
+      <p>或者选择别的文件</p>
+    </div>
     <div class="big">还没有载入配置</div>
     <p>点击「打开 config.json」导入现有配置继续编辑，<br>或「新建空白配置」从头填写你的行程。</p>
     <div class="btns">
@@ -202,7 +224,8 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
   </section>
 
   <footer>
-    🔒 本页面是纯静态本地文件，不发起任何网络请求、不使用 localStorage；<br>
+    🔒 本页面是纯静态本地文件，不发起任何网络请求，也不会把配置内容写入浏览器存储；<br>
+    为省去每次重新选文件，仅在本机浏览器记住「上次打开的文件句柄」（一个引用，不含姓名/行程等内容），可用「忘记它」清除。<br>
     你的信息只存在于你打开/保存的 config.json 中。含真实信息的 config.json 请勿提交到仓库或上传网络。
   </footer>
 </main>
@@ -463,6 +486,143 @@ var $ = function(sel){ return document.querySelector(sel); };
 var state = null;
 var fileHandle = null;   // File System Access API 句柄（Chrome）
 var loadedName = "";
+var pendingHandle = null; // 记忆里存着、还需用户授权一次才能使用的句柄
+
+/* ---------- 记住上次打开的文件 ----------
+   只把「文件句柄」（一个引用）存进 IndexedDB，不保存任何配置内容，
+   因此姓名、行程等个人信息不会被写入浏览器存储。 */
+var MEM_DB = "ticket_bot_config_editor";
+var MEM_STORE = "handles";
+var MEM_KEY = "lastFile";
+
+function memOpenDB(){
+  return new Promise(function(resolve, reject){
+    if (!window.indexedDB) return reject(new Error("indexedDB 不可用"));
+    var settled = false;
+    var rq;
+    try { rq = indexedDB.open(MEM_DB, 1); } catch (e){ return reject(e); }
+    rq.onupgradeneeded = function(){
+      var db = rq.result;
+      if (!db.objectStoreNames.contains(MEM_STORE)) db.createObjectStore(MEM_STORE);
+    };
+    rq.onsuccess = function(){ if (!settled){ settled = true; resolve(rq.result); } };
+    rq.onerror = function(){ if (!settled){ settled = true; reject(rq.error || new Error("存储打开失败")); } };
+    rq.onblocked = function(){ if (!settled){ settled = true; reject(new Error("存储被占用")); } };
+    setTimeout(function(){ if (!settled){ settled = true; reject(new Error("存储响应超时")); } }, 4000);
+  });
+}
+
+function memRun(mode, fn){
+  return memOpenDB().then(function(db){
+    return new Promise(function(resolve, reject){
+      var tx, req;
+      try { tx = db.transaction(MEM_STORE, mode); } catch (e){ return reject(e); }
+      try { req = fn(tx.objectStore(MEM_STORE)); } catch (e){ return reject(e); }
+      tx.oncomplete = function(){ resolve(req ? req.result : undefined); };
+      tx.onerror = function(){ reject(tx.error || new Error("存储操作失败")); };
+      tx.onabort = function(){ reject(tx.error || new Error("存储操作中止")); };
+    });
+  });
+}
+
+function memSave(h){ return memRun("readwrite", function(s){ return s.put(h, MEM_KEY); }); }
+function memLoad(){ return memRun("readonly", function(s){ return s.get(MEM_KEY); }).then(function(r){ return r || null; }); }
+function memClear(){ return memRun("readwrite", function(s){ return s.delete(MEM_KEY); }); }
+
+// 是否具备「记住文件」的能力（句柄 + 存储）
+function canRemember(){ return !!(window.showOpenFilePicker && window.showSaveFilePicker && window.indexedDB); }
+
+function setChip(text, cls){
+  var el = $("#fileName");
+  if (!text){ el.hidden = true; el.textContent = ""; el.className = "filechip"; return; }
+  el.hidden = false;
+  el.textContent = text;
+  el.className = "filechip" + (cls ? " " + cls : "");
+}
+
+function updateChip(){
+  if (!state){ setChip(""); return; }
+  var name = loadedName || (fileHandle && fileHandle.name) || "未命名配置";
+  if (fileHandle) setChip("📄 " + name + " · 已记住，下次自动打开", "ok");
+  else if (canRemember()) setChip("📄 " + name + " · 本次未能记住", "warn");
+  else setChip("📄 " + name + " · 当前浏览器不支持记住文件", "warn");
+}
+
+function showResume(h){
+  pendingHandle = h;
+  $("#resumeName").textContent = (h && h.name) || "config.json";
+  $("#resumeBox").hidden = false;
+}
+function hideResume(){ $("#resumeBox").hidden = true; }
+
+// 用句柄读取真实文件（同时确认它还在原位置）
+async function loadFromHandle(h, okMsg){
+  try {
+    var f = await h.getFile();
+    var text = await f.text();
+    fileHandle = h;
+    loadText(text, f.name);
+    hideResume();
+    updateChip();
+    try { await memSave(h); } catch (e){}
+    if (okMsg) toast(okMsg + " " + f.name, "ok");
+    return true;
+  } catch (err){
+    // 文件被移动 / 删除 / 改名，或授权被拒 → 清掉记忆，回到手动选择
+    try { await memClear(); } catch (e){}
+    fileHandle = null;
+    pendingHandle = null;
+    hideResume();
+    updateChip();
+    if (err && err.name === "NotFoundError"){
+      toast("上次的文件已不在原位置（可能被移动或改名），请重新选择", "err");
+    } else if (err && err.name === "NotAllowedError"){
+      toast("未获得该文件的访问授权，请重新选择文件", "err");
+    } else {
+      toast("恢复上次文件失败：" + (err && err.message ? err.message : err), "err");
+    }
+    return false;
+  }
+}
+
+// 页面打开时尝试恢复
+async function tryRestoreMemory(){
+  if (!canRemember()) return;
+  var h = null;
+  try { h = await memLoad(); } catch (e){ return; }   // 存储不可用 → 静默降级为手动选择
+  if (!h) return;
+  if (typeof h.getFile !== "function" || typeof h.queryPermission !== "function"){
+    try { await memClear(); } catch (e){}
+    return;
+  }
+  var perm = "prompt";
+  try { perm = await h.queryPermission({ mode: "readwrite" }); } catch (e){ perm = "prompt"; }
+  if (perm === "granted"){                 // 浏览器已记住授权 → 零点击直接载入
+    var ok = await loadFromHandle(h, "已自动载入上次编辑的");
+    if (ok) return;
+    return;
+  }
+  showResume(h);                           // 否则给出「继续上次编辑」一键入口
+}
+
+$("#btnResume").addEventListener("click", async function(){
+  if (!pendingHandle){ toast("没有可恢复的文件", "err"); return; }
+  try {
+    var perm = await pendingHandle.queryPermission({ mode: "readwrite" });
+    if (perm !== "granted") perm = await pendingHandle.requestPermission({ mode: "readwrite" });
+    if (perm !== "granted"){ toast("未获得文件访问授权，可点「忘记它」后重新选择", "err"); return; }
+    await loadFromHandle(pendingHandle, "已载入");
+  } catch (err){
+    toast("恢复失败：" + (err && err.message ? err.message : err), "err");
+  }
+});
+
+$("#btnForget").addEventListener("click", async function(){
+  pendingHandle = null;
+  try { await memClear(); } catch (e){}
+  hideResume();
+  toast("已忘记上次的文件", "ok");
+});
 
 function toast(msg, type){
   var t = $("#toast");
@@ -820,12 +980,17 @@ async function doOpen(){
       fileHandle = handles[0];
       var file = await fileHandle.getFile();
       loadText(await file.text(), file.name);
+      hideResume();
+      pendingHandle = fileHandle;
+      updateChip();
+      try { await memSave(fileHandle); } catch (e){}   // 记住它，下次自动打开
       return;
     } catch (err){
       if (err && err.name === "AbortError") return;
       // 其他错误（如浏览器不支持 file:// 下的该 API）→ 走备用方案
     }
   }
+  fileHandle = null;
   $("#fileInput").value = "";
   $("#fileInput").click();
 }
@@ -833,7 +998,10 @@ async function doOpen(){
 $("#fileInput").addEventListener("change", async function(){
   var f = this.files[0];
   if (!f) return;
+  fileHandle = null;                 // 备用入口拿不到句柄，无法记住
   loadText(await f.text(), f.name);
+  hideResume();
+  updateChip();
 });
 
 function downloadText(text){
@@ -859,6 +1027,9 @@ async function doSave(){
       var w = await fileHandle.createWritable();
       await w.write(text);
       await w.close();
+      loadedName = fileHandle.name || loadedName;
+      pendingHandle = fileHandle;
+      updateChip();
       toast("已保存到 " + fileHandle.name, "ok");
       return;
     }
@@ -872,6 +1043,11 @@ async function doSave(){
         await w2.write(text);
         await w2.close();
         fileHandle = h;
+        loadedName = h.name || "config.json";
+        pendingHandle = h;
+        hideResume();
+        updateChip();
+        try { await memSave(h); } catch (e){}   // 记住它，下次自动打开
         toast("已保存到 " + h.name, "ok");
         return;
       } catch (err){
@@ -896,7 +1072,9 @@ function doNew(){
   if (state && !confirm("新建会清空当前编辑内容，确定吗？")) return;
   state = newBlankState();
   fileHandle = null;
+  loadedName = "";
   renderAll();
+  updateChip();
   toast("已新建空白配置", "ok");
 }
 
@@ -905,7 +1083,12 @@ document.addEventListener("dragover", function(e){ e.preventDefault(); });
 document.addEventListener("drop", function(e){
   e.preventDefault();
   var f = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f) f.text().then(function(t){ loadText(t, f.name); });
+  if (f) f.text().then(function(t){
+    fileHandle = null;              // 拖入的文件拿不到句柄，无法记住
+    loadText(t, f.name);
+    hideResume();
+    updateChip();
+  });
 });
 
 /* ---------- 绑定 ---------- */
@@ -950,6 +1133,9 @@ $("#btnCopy").addEventListener("click", function(){
 document.addEventListener("keydown", function(e){
   if (e.key === "Escape") $("#modal").hidden = true;
 });
+
+/* ---------- 启动：尝试恢复上次打开的文件 ---------- */
+tryRestoreMemory();
 </script>
 </body>
 </html>
